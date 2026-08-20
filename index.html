@@ -204,6 +204,28 @@ rebuild();
 
 // ── the view ─────────────────────────────────────────────────────────────
 const orbit = { yaw: 0.72, pitch: 0.46, dist: 190 };
+
+// KEEP THE SIZE HE PICKED, NOT A SIZE I PICKED.
+// Joe, 2026-08-20: "can it do auto-fit on the zoom? I like that size right
+// there." Auto-fit would choose a framing for him. Instead: remember the ratio
+// of camera distance to how big the shape is, and hold THAT. He zooms once to
+// what he likes; the tool keeps it as the shape grows and shrinks under him.
+//
+// AND IT EASES, IT NEVER SNAPS. His one hard test is whether the tool fights
+// him. A camera that jumps while his hand is still moving is the tool fighting.
+let framing = null;              // dist / radius, set the first time we know both
+const EASE = 0.12;               // per frame - fast enough to keep up, slow
+                                 // enough that it reads as the view settling
+function radius() {
+  const s = new THREE.Vector3().subVectors(B.max, B.min);
+  return s.length() * 0.5;
+}
+function holdFraming() {
+  const r = radius();
+  if (framing === null) { framing = orbit.dist / r; return; }
+  const want = framing * r;
+  orbit.dist += (want - orbit.dist) * EASE;
+}
 function placeCamera() {
   const cp = Math.cos(orbit.pitch);
   camera.position.set(Math.sin(orbit.yaw) * cp * orbit.dist,
@@ -335,12 +357,37 @@ cv.addEventListener('pointercancel', release);
 
 cv.addEventListener('wheel', (e) => {
   e.preventDefault();
-  orbit.dist = Math.max(60, Math.min(900, orbit.dist * (1 + Math.sign(e.deltaY) * 0.1)));
+  orbit.dist = Math.max(40, Math.min(2400, orbit.dist * (1 + Math.sign(e.deltaY) * 0.1)));
+  framing = orbit.dist / radius();     // he just told us what size he wants
 }, { passive:false });
+
+// Two fingers on glass do what the wheel does. Same rule: pinching re-teaches
+// the framing rather than fighting it.
+let pinch = null;
+cv.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    pinch = { d: Math.hypot(dx, dy), dist: orbit.dist };
+  }
+}, { passive:true });
+cv.addEventListener('touchmove', (e) => {
+  if (pinch && e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const d = Math.hypot(dx, dy);
+    if (d > 4) {
+      orbit.dist = Math.max(40, Math.min(2400, pinch.dist * (pinch.d / d)));
+      framing = orbit.dist / radius();
+    }
+  }
+}, { passive:true });
+cv.addEventListener('touchend', () => { pinch = null; }, { passive:true });
 
 // ── run ──────────────────────────────────────────────────────────────────
 (function frame() {
   requestAnimationFrame(frame);
+  holdFraming();
   placeCamera();
   renderer.render(scene, camera);
 })();
