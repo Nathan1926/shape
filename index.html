@@ -33,7 +33,18 @@
 <style>
   html, body { margin:0; height:100%; overflow:hidden; background:#15171a; }
   canvas { display:block; touch-action:none; }
+  /* ⭐ The number rides as HTML, not as a texture in the scene - it stays
+     crisp at every zoom and costs nothing. It never takes a click. */
+  #dim { position:fixed; left:0; top:0; pointer-events:none; opacity:0;
+         transform:translate(-50%,-50%); transition:opacity .12s;
+         font:600 15px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+         color:#ffd9b0; background:rgba(18,20,24,.72); padding:4px 8px;
+         border-radius:5px; border:1px solid rgba(255,179,122,.35);
+         font-variant-numeric:tabular-nums; white-space:nowrap; }
+  #dim.on { opacity:1; }
 </style>
+
+<div id="dim"></div>
 
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
@@ -81,6 +92,107 @@ const ghost = new THREE.Mesh(
                                 depthTest:true, side:THREE.DoubleSide }));
 ghost.visible = false;
 scene.add(ghost);
+
+// ── THE RULER ────────────────────────────────────────────────────────────
+// ⭐⭐ HIS ASK, 2026-08-20: *"when I touch the face and pull on it, a grid ruler
+//    thing appears at one corner, a visible corner, maybe a back corner where
+//    I'm not covering it up with my finger, and it automatically pulls a
+//    measurement from the opposing face."* SolidWorks does this in its live 3D
+//    and he says it is the one thing that works well in there.
+//
+// ⛔ THIS IS NOT A DIMENSION BOX AND MUST NEVER BECOME ONE. His own rule stands:
+//    *"If it ever needs a dimension box, it has drifted."* A box is where you
+//    TYPE. This is read-only, it exists only while he is pulling, and it takes
+//    no input. Feedback, not entry.
+//
+// ⭐ ONE DECIMAL INCH, ON PURPOSE. Tenths are coarse enough to read as "about
+//    so big" rather than as a specification. Precision here would be a lie
+//    about what this tool is.
+const DIM_COLOR = 0xffb37a;
+const dimLines = new THREE.LineSegments(
+  new THREE.BufferGeometry(),
+  new THREE.LineBasicMaterial({ color:DIM_COLOR, transparent:true, opacity:0.75,
+                                depthTest:false }));
+dimLines.renderOrder = 999;
+dimLines.visible = false;
+scene.add(dimLines);
+const dimEl = document.getElementById('dim');
+
+const OTHER = { x:['y','z'], y:['x','z'], z:['x','y'] };
+
+// ⭐ PICK THE EDGE HE IS NOT STANDING ON. Of the four edges running along the
+//    drag axis, take the one whose middle lands FURTHEST from the cursor on
+//    screen - that is the back corner he asked for, chosen every frame so it
+//    stays out of the way as he turns the part.
+function farEdge(axis, cursorNdc) {
+  const [a, b] = OTHER[axis];
+  let best = null, bestD = -1;
+  for (const sa of [0, 1]) for (const sb of [0, 1]) {
+    const mid = new THREE.Vector3();
+    mid[axis] = (B.min[axis] + B.max[axis]) / 2;
+    mid[a] = sa ? B.max[a] : B.min[a];
+    mid[b] = sb ? B.max[b] : B.min[b];
+    const sp = mid.clone().project(camera);
+    const d = (sp.x - cursorNdc.x) ** 2 + (sp.y - cursorNdc.y) ** 2;
+    if (d > bestD) { bestD = d; best = { a, b, sa, sb }; }
+  }
+  return best;
+}
+
+function showDim(axis, cursorNdc) {
+  const e = farEdge(axis, cursorNdc);
+  const span = new THREE.Vector3().subVectors(B.max, B.min);
+  // push the witness line a little further out from the body so it does not
+  // sit buried in the silhouette
+  const out = Math.max(6, Math.min(span.x, span.y, span.z) * 0.22);
+  const oa = (e.sa ? 1 : -1) * out, ob = (e.sb ? 1 : -1) * out;
+
+  const p = (t) => {
+    const v = new THREE.Vector3();
+    v[axis] = t ? B.max[axis] : B.min[axis];
+    v[e.a] = (e.sa ? B.max[e.a] : B.min[e.a]) + oa;
+    v[e.b] = (e.sb ? B.max[e.b] : B.min[e.b]) + ob;
+    return v;
+  };
+  const corner = (t) => {           // where the witness line starts, on the body
+    const v = new THREE.Vector3();
+    v[axis] = t ? B.max[axis] : B.min[axis];
+    v[e.a] = e.sa ? B.max[e.a] : B.min[e.a];
+    v[e.b] = e.sb ? B.max[e.b] : B.min[e.b];
+    return v;
+  };
+
+  const A = p(0), Z = p(1), c0 = corner(0), c1 = corner(1);
+  // tick marks, so the ends read as ends rather than as the line running on
+  const t = new THREE.Vector3();
+  t[e.a] = oa * 0.35; t[e.b] = ob * 0.35; t[axis] = 0;
+  const pts = [
+    A, Z,                                              // the measure itself
+    c0, A, c1, Z,                                      // witness lines
+    A.clone().sub(t), A.clone().add(t),                // end ticks
+    Z.clone().sub(t), Z.clone().add(t),
+  ];
+  const arr = new Float32Array(pts.length * 3);
+  pts.forEach((v, i) => { arr[i*3] = v.x; arr[i*3+1] = v.y; arr[i*3+2] = v.z; });
+  dimLines.geometry.dispose();
+  dimLines.geometry = new THREE.BufferGeometry();
+  dimLines.geometry.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  dimLines.visible = true;
+
+  // ⭐ 1 world unit = 1 mm, shown in inches. The unit is a convention, not a
+  //    measurement - nothing here was ever dimensioned.
+  const inches = (B.max[axis] - B.min[axis]) / 25.4;
+  dimEl.textContent = inches.toFixed(1) + '"';
+  const mid = new THREE.Vector3().addVectors(A, Z).multiplyScalar(0.5).project(camera);
+  dimEl.style.left = ((mid.x * 0.5 + 0.5) * innerWidth) + 'px';
+  dimEl.style.top  = ((-mid.y * 0.5 + 0.5) * innerHeight) + 'px';
+  dimEl.classList.add('on');
+}
+
+function hideDim() {
+  dimLines.visible = false;
+  dimEl.classList.remove('on');
+}
 
 function rebuild() {
   const s = new THREE.Vector3().subVectors(B.max, B.min);
@@ -189,6 +301,7 @@ function moveDrag(e) {
   }
   rebuild();
   showGhost(drag);
+  showDim(drag.axis, ptr);
 }
 
 const cv = renderer.domElement;
@@ -196,7 +309,7 @@ const cv = renderer.domElement;
 cv.addEventListener('pointerdown', (e) => {
   cv.setPointerCapture(e.pointerId);
   const f = faceUnder(e);
-  if (f) { beginDrag(f); showGhost(f); }        // ON the shape  -> push/pull
+  if (f) { beginDrag(f); showGhost(f); showDim(f.axis, ptr); }  // ON  -> push/pull
   else   { turning = { x:e.clientX, y:e.clientY }; }  // OFF it   -> turn
 });
 
@@ -215,6 +328,7 @@ cv.addEventListener('pointermove', (e) => {
 function release(e) {
   try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
   drag = null; turning = null;
+  hideDim();          // ⭐ it exists only while he is pulling
 }
 cv.addEventListener('pointerup', release);
 cv.addEventListener('pointercancel', release);
