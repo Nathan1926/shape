@@ -137,7 +137,13 @@ import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 //    new kind. The mesh hanging off each one is only what you look at.
 const SHAPES = [
   { kind:'box', p:new THREE.Vector3(-34, 0, 0), s:new THREE.Vector3(52, 34, 40) },
-  { kind:'cyl', p:new THREE.Vector3( 42, 0, 0), axis:'y', h:52, r0:20, r1:20 },
+  // ⭐ Each end carries TWO radii. Equal = a circle; different = an ellipse.
+  //    Joe, 2026-08-20: *"if I have you put four handles around the
+  //    circumference, it gives me an option to turn a cylinder into an
+  //    ellipse."* Same finding as the cone - a shape he wanted turned out
+  //    not to be a new KIND of shape, only another number.
+  { kind:'cyl', p:new THREE.Vector3( 42, 0, 0), axis:'y', h:52,
+    a0:20, b0:20, a1:20, b1:20 },
 ];
 const FLOOR = 5;          // nothing may be pushed through itself
 const SEG = 48;           // barrel segments - looks round, stays cheap
@@ -172,6 +178,47 @@ const ghost = new THREE.Mesh(new THREE.PlaneGeometry(1,1),
                                 side:THREE.DoubleSide }));
 ghost.visible = false; scene.add(ghost);
 
+// ⛔ THREE.CylinderGeometry CANNOT DO THIS. It takes one radius per end, so
+//    an end that is 30 one way and 12 the other is not expressible - and
+//    scaling the whole mesh only works if both ends share the same ratio,
+//    which is exactly the case he will not stay inside. So we build the rings
+//    ourselves. Two rings, a skirt between them, a fan in each cap.
+// ⭐ It is about forty lines and it removes a whole class of "the library
+//    won't let me", which is the wrong reason to tell him no.
+function frustum(sh) {
+  const a0 = Math.max(sh.a0, 0.001), b0 = Math.max(sh.b0, 0.001);
+  const a1 = Math.max(sh.a1, 0.001), b1 = Math.max(sh.b1, 0.001);
+  const hy = sh.h / 2;
+  const pos = [], idx = [];
+  const ring = (a, b, y) => {
+    const first = pos.length / 3;
+    for (let i = 0; i < SEG; i++) {
+      const t = (i / SEG) * Math.PI * 2;
+      pos.push(Math.cos(t) * a, y, Math.sin(t) * b);
+    }
+    return first;
+  };
+  const bot = ring(a0, b0, -hy);
+  const top = ring(a1, b1,  hy);
+  for (let i = 0; i < SEG; i++) {
+    const j = (i + 1) % SEG;
+    idx.push(bot+i, top+i, top+j,  bot+i, top+j, bot+j);
+  }
+  // caps: a centre vertex and a fan, so the normals come out flat
+  const cB = pos.length / 3; pos.push(0, -hy, 0);
+  const rB = ring(a0, b0, -hy);
+  for (let i = 0; i < SEG; i++) idx.push(cB, rB + ((i+1) % SEG), rB + i);
+  const cT = pos.length / 3; pos.push(0,  hy, 0);
+  const rT = ring(a1, b1,  hy);
+  for (let i = 0; i < SEG; i++) idx.push(cT, rT + i, rT + ((i+1) % SEG));
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
 function axisVec(a) {
   return a === 'x' ? new THREE.Vector3(1,0,0)
        : a === 'y' ? new THREE.Vector3(0,1,0)
@@ -186,10 +233,7 @@ function rebuild(sh) {
   if (sh.kind === 'box') {
     g = new THREE.BoxGeometry(sh.s.x, sh.s.y, sh.s.z);
   } else {
-    // three.js builds cylinders up Y and takes the TOP radius first. The two
-    // radii differing is the whole of "deform".
-    g = new THREE.CylinderGeometry(Math.max(sh.r1, 0.001),
-                                   Math.max(sh.r0, 0.001), sh.h, SEG, 1, false);
+    g = frustum(sh);
   }
   sh.mesh = new THREE.Mesh(g, MAT.clone());
   sh.mesh.position.copy(sh.p);
@@ -206,6 +250,65 @@ function bounds() {
   const b = new THREE.Box3();
   SHAPES.forEach(s => b.expandByObject(s.mesh));
   return b;
+}
+
+// ══ THE HANDLES ══════════════════════════════════════════════════════════
+// ⭐⭐ FOUR PER RIM, AND FOUR FOR A REASON - not symmetry, MEANING. Two of them
+//    own one radius, two own the other. Three would be ambiguous; eight would
+//    be four with spares.
+// ⛔ AND NO KEY IS HELD. He asked for control-drag to lock the opposite pair;
+//    the better answer is that GRABBING ONE HANDLE *IS* THE CONSTRAINT. He has
+//    nerve damage and cannot rely on holding a modifier - it is the one rule
+//    this tool has kept all day: nothing to hold down.
+//       grab a HANDLE  -> that one direction only, and its opposite follows
+//       grab the WALL  -> the whole end, both directions at once
+const HKEYS = [
+  { end:0, k:'a0', dir:0 }, { end:0, k:'b0', dir:1 },
+  { end:1, k:'a1', dir:0 }, { end:1, k:'b1', dir:1 },
+];
+const handles = [];
+const HMAT = new THREE.MeshBasicMaterial({ color:0xffb37a, depthTest:false });
+for (let i = 0; i < 8; i++) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), HMAT);
+  m.renderOrder = 997; m.visible = false;
+  m.userData.slot = i;
+  handles.push(m); scene.add(m);
+}
+
+// ⭐ A handle sits at the far point of the radius it owns, on the rim, on
+//    BOTH sides - so "its opposite follows" is not a rule, it is what you see.
+function handlePlaces(sh) {
+  const av = axisVec(sh.axis);
+  const u = new THREE.Vector3(av.y, av.z, av.x);   // one cross direction
+  const v = new THREE.Vector3().crossVectors(av, u).normalize();
+  const out = [];
+  [0, 1].forEach(end => {
+    const c = sh.p.clone().add(av.clone().multiplyScalar((end ? 1 : -1) * sh.h/2));
+    const ra = end ? sh.a1 : sh.a0, rb = end ? sh.b1 : sh.b0;
+    out.push({ end, dir:0, k:(end?'a1':'a0'), pts:[c.clone().add(u.clone().multiplyScalar(ra)),
+                                                   c.clone().sub(u.clone().multiplyScalar(ra))], axis:u });
+    out.push({ end, dir:1, k:(end?'b1':'b0'), pts:[c.clone().add(v.clone().multiplyScalar(rb)),
+                                                   c.clone().sub(v.clone().multiplyScalar(rb))], axis:v });
+  });
+  return out;
+}
+
+let handleOwner = null;
+function showHandles(sh) {
+  handles.forEach(m => m.visible = false);
+  handleOwner = null;
+  if (!sh || sh.kind !== 'cyl') return;
+  handleOwner = sh;
+  const places = handlePlaces(sh);
+  const size = Math.max(1.6, radius() * 0.022);
+  let n = 0;
+  places.forEach(pl => pl.pts.forEach(pt => {
+    const m = handles[n++];
+    m.position.copy(pt);
+    m.scale.setScalar(size);
+    m.userData.place = pl;
+    m.visible = true;
+  }));
 }
 
 // ══ THE VIEW ═════════════════════════════════════════════════════════════
@@ -271,6 +374,17 @@ function toNdc(e) {
 function handleUnder(e) {
   toNdc(e);
   ray.setFromCamera(ptr, camera);
+
+  // ⭐ A HANDLE OUTRANKS THE SURFACE BEHIND IT. It is smaller and it is
+  //    deliberate - if he aimed at the bead he meant the bead, and losing that
+  //    to the wall behind it is the tool second-guessing him.
+  const hh = ray.intersectObjects(handles.filter(m => m.visible), false)[0];
+  if (hh) {
+    const pl = hh.object.userData.place;
+    return { sh:handleOwner, type:'rad1', k:pl.k, end:pl.end,
+             dirAxis:pl.axis.clone(), point:hh.point };
+  }
+
   const hit = ray.intersectObjects(SHAPES.map(s => s.mesh), false)[0];
   if (!hit) return null;
   const sh = hit.object.userData.shape;
@@ -287,7 +401,7 @@ function handleUnder(e) {
   const end = local.y > 0 ? 1 : 0;           // 1 = the r1 end, 0 = the r0 end
   return cap
     ? { sh, type:'length', end, sign:(n.y > 0 ? 1 : -1), point:hit.point }
-    : { sh, type:'radius', end, point:hit.point };
+    : { sh, type:'radius', end, point:hit.point };   // wall = the whole end
 }
 
 function showGhost(h) {
@@ -311,8 +425,12 @@ function showGhost(h) {
     ghost.visible = true;
     return;
   }
-  // on a cylinder the honest highlight is a ring at the end you have hold of
-  const sh = h.sh, r = h.end ? sh.r1 : sh.r0;
+  // on a cylinder the honest highlight is the rim you have hold of. ⚠️ It is
+  // drawn round at the mean radius even when the end is an ellipse - a small
+  // lie, and the alternative is a custom ring geometry rebuilt every frame for
+  // a hint that is already doing its job.
+  const sh = h.sh;
+  const r = h.end ? (sh.a1 + sh.b1) / 2 : (sh.a0 + sh.b0) / 2;
   ghost.geometry.dispose();
   ghost.geometry = new THREE.RingGeometry(Math.max(r - 1.6, 0.2), r + 1.6, SEG);
   const off = axisVec(sh.axis).multiplyScalar((h.end ? 1 : -1) * (sh.h/2 + 0.35));
@@ -388,17 +506,20 @@ function showDim(h) {
   }
 
   const av = axisVec(sh.axis);
-  const side = new THREE.Vector3(av.y, av.z, av.x);
+  const side = (h.type === 'rad1') ? h.dirAxis.clone()
+                                   : new THREE.Vector3(av.y, av.z, av.x);
   if (h.type === 'length') {
-    const off = Math.max(6, Math.max(sh.r0, sh.r1) * 1.35);
+    const off = Math.max(6, Math.max(sh.a0, sh.b0, sh.a1, sh.b1) * 1.35);
     const s2 = side.clone().multiplyScalar(off);
     const A = sh.p.clone().sub(av.clone().multiplyScalar(sh.h/2)).add(s2);
     const Z = sh.p.clone().add(av.clone().multiplyScalar(sh.h/2)).add(s2);
     setDimLine(A, Z, s2.clone().normalize().multiplyScalar(off*0.22));
     label(sh.h, A.clone().add(Z).multiplyScalar(0.5));
   } else {
-    // diameter across the end he has hold of - the number a machinist wants
-    const r = h.end ? sh.r1 : sh.r0;
+    // diameter across the end he has hold of - the number a machinist wants,
+    // and on an ellipse it is the one in the direction he is actually pulling
+    const r = (h.type === 'rad1') ? sh[h.k]
+                                  : (h.end ? (sh.a1 + sh.b1)/2 : (sh.a0 + sh.b0)/2);
     const c = sh.p.clone().add(av.clone().multiplyScalar((h.end?1:-1) * sh.h/2));
     const across = side.clone().multiplyScalar(r);
     setDimLine(c.clone().sub(across), c.clone().add(across),
@@ -418,6 +539,7 @@ const dragPlane = new THREE.Plane();
 const scratch = new THREE.Vector3();
 
 function travelAxis(h) {
+  if (h.type === 'rad1') return h.dirAxis.clone();
   if (h.sh.kind === 'box') return axisVec(h.axis);
   if (h.type === 'length') return axisVec(h.sh.axis);
   // radius: travel is straight out from the centreline, through the hit point
@@ -446,10 +568,11 @@ function beginDrag(h) {
            //    the part instead of being a number I picked out of the air
            cap: (h.sh.kind === 'box'
                  ? Math.max(h.sh.s.x, h.sh.s.y, h.sh.s.z)
-                 : Math.max(h.sh.h, h.sh.r0, h.sh.r1)) * 4 + 60,
+                 : Math.max(h.sh.h, h.sh.a0, h.sh.b0, h.sh.a1, h.sh.b1)) * 4 + 60,
            start: h.point.clone(),
            was: h.sh.kind === 'box' ? { s:h.sh.s.clone(), p:h.sh.p.clone() }
-                                    : { h:h.sh.h, r0:h.sh.r0, r1:h.sh.r1,
+                                    : { h:h.sh.h, a0:h.sh.a0, b0:h.sh.b0,
+                                        a1:h.sh.a1, b1:h.sh.b1,
                                         p:h.sh.p.clone() } };
 }
 
@@ -481,16 +604,22 @@ function moveDrag(e) {
     const grow = drag.sign * d;
     sh.h = Math.max(FLOOR, w.h + grow);
     sh.p.copy(w.p).add(axisVec(sh.axis).multiplyScalar(drag.sign * (sh.h - w.h) / 2));
+  } else if (drag.type === 'rad1') {
+    // ⭐⭐ ONE DIRECTION ONLY. This is the ellipse, and nothing was held down to
+    //    get it - he grabbed the bead that owns this radius.
+    sh[drag.k] = Math.max(0.2, w[drag.k] + d);
   } else {
-    // ⭐⭐ DEFORM. Only the end you have hold of moves, so a cylinder becomes a
-    //    cone by squeezing one end - his own finding, and the cheapest verb on
-    //    the list because a cone is not a new kind of thing.
-    const k = drag.end ? 'r1' : 'r0';
-    sh[k] = Math.max(0.2, w[k] + d);
+    // ⭐ THE WALL MOVES THE WHOLE END, both directions together, so a round
+    //    thing stays round unless he asks otherwise. Squeeze one end and the
+    //    cylinder draws up into a cone - his own finding.
+    const ka = drag.end ? 'a1' : 'a0', kb = drag.end ? 'b1' : 'b0';
+    sh[ka] = Math.max(0.2, w[ka] + d);
+    sh[kb] = Math.max(0.2, w[kb] + d);
   }
   rebuild(sh);
   showGhost(drag);
   showDim(drag);
+  showHandles(sh.kind === 'cyl' ? sh : null);
 }
 
 // ══ UNDO ═════════════════════════════════════════════════════════════════
@@ -505,7 +634,8 @@ const PAST_MAX = 40;
 function snapshot() {
   past.push(SHAPES.map(sh => sh.kind === 'box'
     ? { kind:'box', p:sh.p.clone(), s:sh.s.clone() }
-    : { kind:'cyl', p:sh.p.clone(), axis:sh.axis, h:sh.h, r0:sh.r0, r1:sh.r1 }));
+    : { kind:'cyl', p:sh.p.clone(), axis:sh.axis, h:sh.h,
+        a0:sh.a0, b0:sh.b0, a1:sh.a1, b1:sh.b1 }));
   if (past.length > PAST_MAX) past.shift();
 }
 function undo() {
@@ -515,11 +645,12 @@ function undo() {
     const sh = SHAPES[i];
     sh.p.copy(w.p);
     if (sh.kind === 'box') sh.s.copy(w.s);
-    else { sh.h = w.h; sh.r0 = w.r0; sh.r1 = w.r1; }
+    else { sh.h = w.h; sh.a0 = w.a0; sh.b0 = w.b0; sh.a1 = w.a1; sh.b1 = w.b1; }
     rebuild(sh);
   });
   ghost.visible = false;
   hideDim();
+  showHandles(null);
 }
 addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
@@ -571,7 +702,12 @@ cv.addEventListener('pointermove', (e) => {
     turning.x = e.clientX; turning.y = e.clientY;
     return;
   }
-  showGhost(handleUnder(e));
+  const h = handleUnder(e);
+  showGhost(h);
+  // ⭐ The beads appear when his hand is near the thing they belong to, and
+  //    go away when it is not. Always-on beads are clutter; never-on beads are
+  //    a feature nobody finds.
+  showHandles(h && h.sh.kind === 'cyl' ? h.sh : null);
 });
 
 function release(e) {
