@@ -352,6 +352,40 @@ waist.renderOrder = 996; waist.visible = false; scene.add(waist);
 
 function meanR(sh) { return (sh.a0 + sh.b0 + sh.a1 + sh.b1) / 4; }
 
+// ⭐⭐ THE HOOK. Joe, 2026-08-20: *"I need a method for actually dragging
+//    shapes around and moving them... stack them on top of each other and
+//    stick them to the side."*
+// ⛔ IT CANNOT BE "DRAG THE BODY" - dragging the body already means push the
+//    face, and that is the rule the whole tool rests on. So moving gets its
+//    own grab point, in the same vocabulary as the beads and the waist.
+// ⭐ IT SITS ABOVE THE SHAPE LIKE A LIFTING EYE, not at the centre. A ball
+//    floating inside a box reads as a bug; a hook over the top reads as
+//    "pick this up" without anybody explaining it.
+// ⚠️ AND IT MOVES ON THE PLANE FACING THE CAMERA. Turning 2D mouse motion into
+//    3D placement is genuinely ambiguous - he said so himself. This gets him
+//    CLOSE, and SNAP is what makes it land. Rough placement plus a snap is
+//    legible; rough placement alone is a pile.
+const hook = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12),
+  new THREE.MeshBasicMaterial({ color:0x9ad1ff, depthTest:false }));
+hook.renderOrder = 995; hook.visible = false; scene.add(hook);
+let hookOwner = null;
+
+function shapeTop(sh) {
+  const up = new THREE.Vector3(0, 1, 0);
+  const half = sh.kind === 'box'
+    ? sh.s.y / 2
+    : (sh.axis === 'y' ? sh.h / 2 : Math.max(sh.a0, sh.b0, sh.a1, sh.b1));
+  return sh.p.clone().add(up.multiplyScalar(half + Math.max(4, radius() * 0.05)));
+}
+
+function showHook(sh) {
+  hookOwner = sh || null;
+  if (!sh) { hook.visible = false; return; }
+  hook.position.copy(shapeTop(sh));
+  hook.scale.setScalar(Math.max(1.8, radius() * 0.026));
+  hook.visible = true;
+}
+
 let handleOwner = null;
 function showHandles(sh) {
   handles.forEach(m => m.visible = false);
@@ -448,6 +482,11 @@ function handleUnder(e) {
   // ⭐ A HANDLE OUTRANKS THE SURFACE BEHIND IT. It is smaller and it is
   //    deliberate - if he aimed at the bead he meant the bead, and losing that
   //    to the wall behind it is the tool second-guessing him.
+  if (hook.visible) {
+    const kh = ray.intersectObject(hook, false)[0];
+    if (kh) return { sh:hookOwner, type:'move', point:kh.point };
+  }
+
   if (waist.visible) {
     const wh = ray.intersectObject(waist, false)[0];
     if (wh) return { sh:handleOwner, type:'whole', point:wh.point };
@@ -641,6 +680,16 @@ function travelAxis(h) {
 }
 
 function beginDrag(h) {
+  if (h.type === 'move') {
+    const n = camera.position.clone().sub(h.sh.p).normalize();
+    dragPlane.setFromNormalAndCoplanarPoint(n, h.sh.p);
+    const at = new THREE.Vector3();
+    ray.ray.intersectPlane(dragPlane, at);
+    drag = { ...h, type:'move',
+             grab: at.clone().sub(h.sh.p),      // keep the hook under his cursor
+             was: { p:h.sh.p.clone() } };
+    return;
+  }
   const a = travelAxis(h);
   const toCam = camera.position.clone().sub(h.point).normalize();
   const n = toCam.clone().sub(a.clone().multiplyScalar(toCam.dot(a)));
@@ -671,6 +720,14 @@ function moveDrag(e) {
   toNdc(e);
   ray.setFromCamera(ptr, camera);
   if (!ray.ray.intersectPlane(dragPlane, scratch)) return;
+
+  if (drag.type === 'move') {
+    drag.sh.p.copy(scratch).sub(drag.grab);
+    drag.sh.mesh.position.copy(drag.sh.p);     // ⭐ no rebuild - nothing changed
+    showHook(drag.sh);                          //    shape, only where it is
+    showHandles(drag.sh.kind === 'cyl' ? drag.sh : null);
+    return;
+  }
   let d = scratch.clone().sub(drag.start).dot(drag.a);
 
   // ⚠️ TWO GUARDS, AND BOTH ARE HONEST ABOUT WHAT THEY GIVE UP.
@@ -810,6 +867,7 @@ function undo() {
   ghost.visible = false;
   hideDim();
   showHandles(null);
+  showHook(null);
 }
 addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
@@ -862,7 +920,8 @@ cv.addEventListener('pointermove', (e) => {
     return;
   }
   const h = handleUnder(e);
-  showGhost(h);
+  showGhost(h && h.type !== 'move' ? h : null);
+  showHook(h ? h.sh : null);
   // ⭐ The beads appear when his hand is near the thing they belong to, and
   //    go away when it is not. Always-on beads are clutter; never-on beads are
   //    a feature nobody finds.
