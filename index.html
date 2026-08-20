@@ -144,6 +144,11 @@
                     stroke-width:1.6; }
   #box button.armed { border-color:#ffb37a; background:#2a2119; }
   #box button.armed svg { stroke:#ffb37a; }
+  /* ⭐ HELD, not armed. The tool is IN HIS HAND and the button says so
+     until he uses it or puts it down. That visibility is the whole reason
+     this is allowed to be a two-click verb at all. */
+  #box button.held { border-color:#9ad1ff; background:#16222c; }
+  #box button.held svg { stroke:#9ad1ff; }
 </style>
 
 <div id="dim"></div>
@@ -160,6 +165,12 @@
       <path d="M7 9v14M25 9v14"/><path d="M7 23a9 4 0 0 0 18 0"/></svg></button>
   <!-- ⭐ A BEAD IN A CORNER JOINT. Not a chain link, not a padlock - the
        picture a fabricator already reads without being told. -->
+  <!-- ⭐ Two faces with arrows driving them together. Not a chain, not a
+       magnet - the picture of the thing happening. -->
+  <button data-tool="mate" title="mate">
+    <svg viewBox="0 0 32 32"><path d="M4 6v20M28 6v20"/>
+      <path d="M9 16h5M23 16h-5"/><path d="M12 13l3 3-3 3M20 13l-3 3 3 3"
+      stroke-linejoin="round"/></svg></button>
   <button data-tool="weld" title="weld">
     <svg viewBox="0 0 32 32"><path d="M5 25h22M9 25V7"/>
       <path d="M11 23l3-3-3-3 3-3-3-3" stroke-linejoin="round"/></svg></button>
@@ -890,6 +901,17 @@ document.querySelectorAll('#box button').forEach(btn => {
     // ⭐ A TOOL IS DROPPED ON A THING; A SHAPE IS DROPPED IN A PLACE. Same
     //    gesture out of the same carousel, which is what makes the next tool
     //    (the knife) cost nothing to teach.
+    // ⭐ PICKING IT UP IS THE SAME GESTURE AS EVERY OTHER TOOL - drag out,
+    //    let go on the thing. The difference is it STAYS in his hand after.
+    if (tool === 'mate') {
+      const f = faceOf(handleUnder(e));
+      if (!f) return;                    // let go on nothing: never picked up
+      mateA = f; mateBtn = btn;
+      btn.classList.add('held');
+      markFace(f);
+      return;
+    }
+
     if (tool === 'weld') {
       const on = shapeAt(e);
       if (!on) return;                      // dropped on air - nothing happened
@@ -914,6 +936,90 @@ document.querySelectorAll('#box button').forEach(btn => {
     rebuild(sh);
   });
 });
+
+// ══ MATE ═════════════════════════════════════════════════════════════════
+// ⭐⭐ JOE, 2026-08-20: *"Can you add a mate command? I press mate and then
+//    click two faces, and boom, they go together regardless of where they
+//    are."* And: *"that might even be useful when we have the VR rig."*
+//
+// ⭐ IT IS NOT SNAP. Snap needs the two things to already be close - it makes
+//    "nearly touching" into "touching". MATE WORKS AT ANY DISTANCE, which is a
+//    genuinely different verb and the reason it earns its own slot.
+//
+// ⛔⛔ AND IT BENDS HIS OWN RULE, SO SAY SO OUT LOUD. "No modes" has held since
+//    the first hour. Press-then-click-two-things IS a mode.
+// ⭐⭐ WHAT SAVES IT: THE RULE WAS NEVER ABOUT MODES, IT WAS ABOUT HOLDING.
+//    He cannot hold a key, so nothing may depend on a hand staying clamped.
+//    But PICKING A TOOL UP is not holding - the button stays lit, the face
+//    stays marked, and there is nothing invisible to remember. That is the
+//    kid's-toolbox metaphor doing exactly what it was for.
+// ⭐ AND IT IS WHY HE IS RIGHT ABOUT GOGGLES: in VR you do not press mate, you
+//    PICK UP the mate tool and touch two faces. The gesture is already the
+//    right shape for hands - this is the mouse translation of it, not the
+//    other way round.
+//
+// ⚠️ WHAT IT HONESTLY CANNOT DO: rotate. Nothing in this tool rotates yet, so
+//    two faces that are not on the same axis cannot be brought parallel. ⭐ So
+//    mate reads B'S face as the truth and seats A flush against it, centred.
+//    That is coincident-plus-two-centres, which is what he described, and it
+//    never leaves one solid buried inside another.
+const mark = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({ color:0x9ad1ff, transparent:true, opacity:0.35,
+                                side:THREE.DoubleSide, depthTest:false }));
+mark.renderOrder = 997; mark.visible = false; scene.add(mark);
+
+let mateA = null, mateBtn = null;
+
+// ⭐ ONE SHAPE OF ANSWER FOR BOTH KINDS. A box face and a cylinder's flat end
+//    are the same thing to this verb: an axis and a side.
+function faceOf(h) {
+  if (!h) return null;
+  if (h.sh.kind === 'box' && h.type === 'face')
+    return { sh:h.sh, ax:h.axis, sgn:h.sign };
+  if (h.sh.kind === 'cyl' && h.type === 'length')
+    return { sh:h.sh, ax:h.sh.axis, sgn:h.sign };
+  return null;                       // a barrel is not a face. Keep waiting.
+}
+
+function markFace(f) {
+  if (!f) { mark.visible = false; return; }
+  const e = ext(f.sh);
+  const sz = new THREE.Vector3().subVectors(e.max, e.min);
+  const c = new THREE.Vector3().addVectors(e.max, e.min).multiplyScalar(0.5);
+  c[f.ax] = (f.sgn > 0 ? e.max[f.ax] : e.min[f.ax]) + 0.4 * f.sgn;
+  mark.geometry.dispose();
+  mark.rotation.set(0, 0, 0);
+  if (f.ax === 'x') { mark.geometry = new THREE.PlaneGeometry(sz.z, sz.y); mark.rotation.y = Math.PI/2; }
+  else if (f.ax === 'y') { mark.geometry = new THREE.PlaneGeometry(sz.x, sz.z); mark.rotation.x = Math.PI/2; }
+  else { mark.geometry = new THREE.PlaneGeometry(sz.x, sz.y); }
+  mark.position.copy(c);
+  mark.visible = true;
+}
+
+function dropTool() {
+  mateA = null;
+  mark.visible = false;
+  if (mateBtn) mateBtn.classList.remove('held');
+  mateBtn = null;
+}
+
+// ⭐ A MOVES TO B. He points at what he wants to move, then at where it goes -
+//    the same order as saying it out loud, and the only order that does not
+//    need a rule to remember.
+function doMate(a, b) {
+  const ax = b.ax, sgn = b.sgn;
+  const eb = ext(b.sh), ea = ext(a.sh);
+  const move = new THREE.Vector3();
+  // seat A's near extreme exactly on B's face plane, on the OUTSIDE of it
+  move[ax] = (sgn > 0 ? eb.max[ax] - ea.min[ax] : eb.min[ax] - ea.max[ax]);
+  // and centre it on the other two, which is the "boom" half
+  AX.forEach(x => { if (x !== ax) move[x] = b.sh.p[x] - a.sh.p[x]; });
+
+  // ⛔ THE WHOLE CREW TRAVELS. A rigid translation keeps every weld fraction
+  //    intact, so a mated hammer arrives assembled rather than in pieces.
+  crewOf(a.sh).forEach(o => { o.p.add(move); o.mesh.position.copy(o.p); });
+  refreshWelds();
+}
 
 // ══ SNAP ═════════════════════════════════════════════════════════════════
 // ⭐⭐ HIS SMARTMATES INSTINCT, AND IT BELONGS HERE MORE THAN IN SOLIDWORKS.
@@ -1273,12 +1379,14 @@ function undo() {
     rebuild(sh);
   });
   refreshWelds();
+  dropTool();                 // ⛔ undo cannot leave a tool half-used in his hand
   ghost.visible = false;
   hideDim();
   showHandles(null);
   showHook(null);
 }
 addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { dropTool(); return; }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     e.preventDefault();
     undo();
@@ -1350,6 +1458,23 @@ cv.addEventListener('pointerdown', (e) => {
     panning = { x:e.clientX, y:e.clientY };
     return;
   }
+  // ⛔ BEFORE THE TAP CLOCK AND BEFORE ANY DRAG. While the mate tool is in
+  //    his hand the next touch means one thing only, and a half-started drag
+  //    underneath it would be the tool fighting him.
+  if (mateA) {
+    e.preventDefault();
+    const f = faceOf(handleUnder(e));
+    if (f && f.sh !== mateA.sh) {
+      snapshot();
+      doMate(mateA, f);
+    }
+    // ⭐ ANY OTHER TOUCH PUTS THE TOOL DOWN - empty space, the same shape, a
+    //    barrel. There is no wrong click, only a click that ends it, which is
+    //    the cheapest escape there is for a hand that cannot hold anything.
+    dropTool();
+    return;
+  }
+
   const now = performance.now();
   const near = Math.hypot(e.clientX-lastXY[0], e.clientY-lastXY[1]) < 24;
   if (now - lastTap < 320 && near) {
