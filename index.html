@@ -220,18 +220,64 @@ function radius() {
   const s = new THREE.Vector3().subVectors(B.max, B.min);
   return s.length() * 0.5;
 }
+// ⚠️ When he has pointed at a detail, the framing he wants is relative to THAT,
+//    not to the whole part - otherwise growing the box shoves his close-up away.
+function framingRadius() {
+  return spot.visible ? Math.max(radius() * 0.18, 4) : radius();
+}
 function holdFraming() {
-  const r = radius();
+  const r = framingRadius();
   if (framing === null) { framing = orbit.dist / r; return; }
   const want = framing * r;
   orbit.dist += (want - orbit.dist) * EASE;
 }
+// WHAT YOU ORBIT AROUND IS A CHOICE, AND IT WAS THE MISSING HALF.
+// Joe, 2026-08-20: "as I get into more complex whatevers, I might want to zoom
+// in and look closely at a section, a detail, a relationship between two edges."
+// Zoom moves you toward the CENTRE. Looking at a detail means moving the centre
+// TO the detail. With the camera nailed to the origin, zooming in on a corner
+// just fills the screen with the middle of the part.
+//
+// DOUBLE-TAP THE SPOT. No menu, no key to hold, nothing to aim at but the thing
+// he already wants to look at - which is the same one-rule discipline as the
+// rest of this page. Double-tap off the shape and it goes back to the whole.
+const pivot = new THREE.Vector3(0, 0, 0);
+const pivotWant = new THREE.Vector3(0, 0, 0);
+
 function placeCamera() {
+  // eased, never snapped - the view settles toward the new centre instead of
+  // cutting to it, so it never reads as the tool taking the wheel off him
+  pivot.lerp(pivotWant, 0.14);
   const cp = Math.cos(orbit.pitch);
-  camera.position.set(Math.sin(orbit.yaw) * cp * orbit.dist,
-                      Math.sin(orbit.pitch)     * orbit.dist,
-                      Math.cos(orbit.yaw) * cp * orbit.dist);
-  camera.lookAt(0, 0, 0);
+  camera.position.set(pivot.x + Math.sin(orbit.yaw) * cp * orbit.dist,
+                      pivot.y + Math.sin(orbit.pitch)     * orbit.dist,
+                      pivot.z + Math.cos(orbit.yaw) * cp * orbit.dist);
+  camera.lookAt(pivot);
+}
+
+// a small marker so he can see WHERE he told it to look. It is feedback, not
+// decoration - without it a pivot he set by accident is invisible and the view
+// just feels wrong for no reason he can point at.
+const spot = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 16, 12),
+  new THREE.MeshBasicMaterial({ color:0xffb37a, transparent:true, opacity:0.85,
+                                depthTest:false }));
+spot.renderOrder = 998;
+spot.visible = false;
+scene.add(spot);
+
+function lookHere(e) {
+  const f = faceUnder(e);
+  if (f) {
+    pivotWant.copy(f.point);
+    spot.position.copy(f.point);
+    spot.scale.setScalar(Math.max(0.8, radius() * 0.018));
+    spot.visible = true;
+  } else {
+    // off the shape: back to the whole thing
+    pivotWant.copy(B.min).add(B.max).multiplyScalar(0.5);
+    spot.visible = false;
+  }
 }
 
 function resize() {
@@ -328,7 +374,19 @@ function moveDrag(e) {
 
 const cv = renderer.domElement;
 
+// ⭐ One path for mouse and finger. A dblclick handler would leave touch out,
+//    and touch is where he actually works.
+let lastTap = 0, lastTapXY = [0, 0];
 cv.addEventListener('pointerdown', (e) => {
+  const now = performance.now();
+  const near = Math.hypot(e.clientX - lastTapXY[0], e.clientY - lastTapXY[1]) < 24;
+  if (now - lastTap < 320 && near) {
+    lastTap = 0;
+    lookHere(e);
+    return;                       // ⛔ a look is not a grab - do not also drag
+  }
+  lastTap = now; lastTapXY = [e.clientX, e.clientY];
+
   cv.setPointerCapture(e.pointerId);
   const f = faceUnder(e);
   if (f) { beginDrag(f); showGhost(f); showDim(f.axis, ptr); }  // ON  -> push/pull
@@ -358,7 +416,7 @@ cv.addEventListener('pointercancel', release);
 cv.addEventListener('wheel', (e) => {
   e.preventDefault();
   orbit.dist = Math.max(40, Math.min(2400, orbit.dist * (1 + Math.sign(e.deltaY) * 0.1)));
-  framing = orbit.dist / radius();     // he just told us what size he wants
+  framing = orbit.dist / framingRadius();   // he just told us what size he wants
 }, { passive:false });
 
 // Two fingers on glass do what the wheel does. Same rule: pinching re-teaches
@@ -378,7 +436,7 @@ cv.addEventListener('touchmove', (e) => {
     const d = Math.hypot(dx, dy);
     if (d > 4) {
       orbit.dist = Math.max(40, Math.min(2400, pinch.dist * (pinch.d / d)));
-      framing = orbit.dist / radius();
+      framing = orbit.dist / framingRadius();
     }
   }
 }, { passive:true });
