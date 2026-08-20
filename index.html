@@ -158,6 +158,11 @@
   <button data-kind="cyl" title="cylinder">
     <svg viewBox="0 0 32 32"><ellipse cx="16" cy="9" rx="9" ry="4"/>
       <path d="M7 9v14M25 9v14"/><path d="M7 23a9 4 0 0 0 18 0"/></svg></button>
+  <!-- ⭐ A BEAD IN A CORNER JOINT. Not a chain link, not a padlock - the
+       picture a fabricator already reads without being told. -->
+  <button data-tool="weld" title="weld">
+    <svg viewBox="0 0 32 32"><path d="M5 25h22M9 25V7"/>
+      <path d="M11 23l3-3-3-3 3-3-3-3" stroke-linejoin="round"/></svg></button>
 </div>
 
 <script type="module">
@@ -379,8 +384,15 @@ function shapeTop(sh) {
 }
 
 function showHook(sh) {
+  // ⭐⭐ HE SEES WHAT HE IS ABOUT TO PICK UP, BEFORE HE PICKS IT UP. A hook that
+  //    silently carries three other shapes is a surprise, and a surprise in a
+  //    tool he cannot undo with fine motor control is the thing to avoid.
+  SHAPES.forEach(o => { if (o.mesh) o.mesh.material.emissive.setHex(0x000000); });
   hookOwner = sh || null;
   if (!sh) { hook.visible = false; return; }
+  crewOf(sh).forEach(o => {
+    if (o !== sh && o.mesh) o.mesh.material.emissive.setHex(0x3a2610);
+  });
   hook.position.copy(shapeTop(sh));
   hook.scale.setScalar(Math.max(1.8, radius() * 0.026));
   hook.visible = true;
@@ -519,7 +531,9 @@ function handleUnder(e) {
 }
 
 function showGhost(h) {
-  if (!h) { ghost.visible = false; return; }
+  // ⛔ same reason: the ghost marks the face being pushed, and a carry pushes
+  //    no face. It was drawing one from an undefined axis.
+  if (!h || h.type === 'move') { ghost.visible = false; return; }
   if (h.sh.kind === 'box') {
     const s = h.sh.s, c = h.sh.p, lift = 0.3;
     ghost.rotation.set(0,0,0);
@@ -588,6 +602,18 @@ function label(mm, mid) {
 const OTHER = { x:['y','z'], y:['x','z'], z:['x','y'] };
 
 function showDim(h) {
+  // ⛔⛔ FOUND BY DRIVING IT IN A BROWSER, 2026-08-20, and it had been throwing
+  //    on EVERY carry since move was built. A move handle has no `axis`, so
+  //    `OTHER[undefined]` destructured to nothing and this threw - after the
+  //    drag had already begun, so the exception went to the event loop and the
+  //    move still worked. ⭐ A BUG WHOSE ONLY SYMPTOM IS A LINE IN A CONSOLE
+  //    NOBODY OPENS IS THE SAME FAMILY AS THE DEAD WAKE BLOCK: the failure
+  //    looks exactly like success.
+  // ⭐ AND THE RIGHT FIX IS NOT A GUARD, IT IS AN ANSWER: carrying a shape
+  //    changes no number, so there is nothing for the ruler to say. It stays
+  //    away, which is also what he asked of it - the ruler exists only while
+  //    he is pulling.
+  if (!h || h.type === 'move') { hideDim(); return; }
   const sh = h.sh;
   if (sh.kind === 'box') {
     // ⭐ PICK THE EDGE HE IS NOT STANDING ON, every frame - of the four running
@@ -687,6 +713,10 @@ function beginDrag(h) {
     ray.ray.intersectPlane(dragPlane, at);
     drag = { ...h, type:'move',
              grab: at.clone().sub(h.sh.p),      // keep the hook under his cursor
+             // ⭐ THE CREW IS TAKEN ONCE, AT THE START. Walking the welds every
+             //    frame would let a snap made mid-drag change what he is
+             //    carrying underneath his own hand.
+             crew: crewOf(h.sh),
              was: { p:h.sh.p.clone() } };
     return;
   }
@@ -722,17 +752,32 @@ function moveDrag(e) {
   if (!ray.ray.intersectPlane(dragPlane, scratch)) return;
 
   if (drag.type === 'move') {
+    const before = drag.sh.p.clone();
     drag.sh.p.copy(scratch).sub(drag.grab);
 
     // ⭐ Propose from where his hand actually is, then move the shape to the
     //    proposal. Shove past the tolerance and there is no proposal any more -
     //    which is how he overrules it without holding anything down.
-    const prop = proposeSnap(drag.sh);
+    // ⛔ AND THE CREW IS INVISIBLE TO THE SNAP. Without that, a welded pair
+    //    proposes snapping to itself, forever, and the whole assembly locks up
+    //    the moment you pick it up.
+    const prop = proposeSnap(drag.sh, drag.crew);
     if (prop) drag.sh.p.add(prop.move);
     showSnap(drag.sh, prop);
 
+    // ⭐⭐ THE ANSWER TO HIS COMPLAINT, AND IT IS ONE LINE: everything welded
+    //    to it moves by the SAME delta. Move the base and the post comes with
+    //    it - which is the entire point of the rung.
+    const delta = drag.sh.p.clone().sub(before);
+    drag.crew.forEach(o => {
+      if (o === drag.sh) return;
+      o.p.add(delta);
+      o.mesh.position.copy(o.p);
+    });
+
     drag.sh.mesh.position.copy(drag.sh.p);     // ⭐ no rebuild - nothing changed
-    showHook(drag.sh);                          //    shape, only where it is
+    refreshWelds();                             //    shape, only where it is
+    showHook(drag.sh);
     showHandles(drag.sh.kind === 'cyl' ? drag.sh : null);
     return;
   }
@@ -792,6 +837,13 @@ function moveDrag(e) {
 //    "drop the shape onto the face where I want it, or just position it."
 let carrying = null;
 
+function shapeAt(e) {
+  toNdc(e);
+  ray.setFromCamera(ptr, camera);
+  const hit = ray.intersectObjects(SHAPES.map(x => x.mesh), false)[0];
+  return hit ? hit.object.userData.shape : null;
+}
+
 function groundOrFace(e) {
   toNdc(e);
   ray.setFromCamera(ptr, camera);
@@ -810,18 +862,31 @@ document.querySelectorAll('#box button').forEach(btn => {
   btn.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     btn.setPointerCapture(e.pointerId);
-    carrying = { kind:btn.dataset.kind, btn };
+    carrying = { kind:btn.dataset.kind, tool:btn.dataset.tool, btn };
     btn.classList.add('armed');
   });
   btn.addEventListener('pointerup', (e) => {
     if (!carrying) return;
-    const kind = carrying.kind;
+    const kind = carrying.kind, tool = carrying.tool;
     carrying.btn.classList.remove('armed');
     try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
     carrying = null;
     // ⛔ let go over the strip itself = he changed his mind. Not an error, and
     //    not a shape dumped behind the toolbox where he cannot reach it.
     if (e.clientX < 84) return;
+
+    // ⭐ A TOOL IS DROPPED ON A THING; A SHAPE IS DROPPED IN A PLACE. Same
+    //    gesture out of the same carousel, which is what makes the next tool
+    //    (the knife) cost nothing to teach.
+    if (tool === 'weld') {
+      const on = shapeAt(e);
+      if (!on) return;                      // dropped on air - nothing happened
+      snapshot();
+      weldDrop(on);
+      refreshWelds();
+      showHook(null);
+      return;
+    }
 
     snapshot();
     const size = Math.max(24, radius() * 0.45);
@@ -882,13 +947,14 @@ function ext(sh) {
   return { min: sh.p.clone().sub(half), max: sh.p.clone().add(half) };
 }
 
-function proposeSnap(sh) {
+function proposeSnap(sh, skip) {
   const me = ext(sh);
   const tol = Math.max(4, radius() * 0.055);
   let best = null;
 
   SHAPES.forEach(other => {
     if (other === sh) return;
+    if (skip && skip.indexOf(other) >= 0) return;   // ⛔ never snap to my own crew
     const it = ext(other);
 
     AX.forEach(A => {
@@ -963,6 +1029,109 @@ function showSnap(sh, prop) {
   snapLines.visible = true;
 }
 
+// ══ WELD ═════════════════════════════════════════════════════════════════
+// ⭐⭐ JOE ASKED FOR THIS AS A BUTTON: *"a weld button... it'll lock it in
+//    place until I tell it to unweld."* ⛔ IT IS A CONSTRAINT, NOT A BOOLEAN.
+//    Two shapes stay themselves and agree to travel together. A FUSE would
+//    make one body, need real topology, and kill push-pull the same way a cut
+//    would - which is why the design record has this rung marked CHEAP and
+//    the cut rung marked as where the representation dies.
+//
+// ⭐ WHY IT IS A DELIBERATE ACT AND NOT AUTOMATIC. Welding whatever the snap
+//    touched would have cost nothing and I nearly did it. ⛔ But he said "until
+//    I TELL it to unweld" - he described an act, twice. Auto-welding would
+//    make lining two things up and sticking them together the same gesture,
+//    and then there is no way to only line them up.
+//
+// ⭐⭐ AND THE STATE HAS TO BE VISIBLE OR THE TOGGLE IS A TRAP. Drop the tool
+//    on a loose shape and it welds; drop it on a welded one and it lets go.
+//    That is only safe because the TACKS SHOW at every seam - he can see which
+//    it is before he drops. A toggle over invisible state would be a mode.
+const WELDS = [];                 // [i, j] index pairs into SHAPES, symmetric
+
+const TACK_G = new THREE.SphereGeometry(1, 10, 8);
+const TACK_M = new THREE.MeshBasicMaterial({ color:0xffb37a, depthTest:false });
+const tacks  = new THREE.Group(); scene.add(tacks);
+
+// ⭐ A GROUP IS NOT STORED, IT IS WALKED. Storing groups means keeping them in
+//    step with the pairs; walking them means the pairs are the only truth.
+//    Weld A to B and B to C and the whole chain comes along, for free.
+function crewOf(sh) {
+  const seed = SHAPES.indexOf(sh);
+  if (seed < 0) return [sh];
+  const seen = new Set([seed]), queue = [seed];
+  while (queue.length) {
+    const a = queue.pop();
+    WELDS.forEach(([i, j]) => {
+      const o = i === a ? j : (j === a ? i : -1);
+      if (o >= 0 && !seen.has(o)) { seen.add(o); queue.push(o); }
+    });
+  }
+  return [...seen].map(i => SHAPES[i]).filter(Boolean);
+}
+
+// ⚠️ TOUCHING IS AXIS-ALIGNED BOX OVERLAP, like everything else here. It says
+//    yes to a cylinder near a box corner that is not really touching. ⭐ That
+//    is the RIGHT error for a brainstorming tool: welding one thing too many
+//    is undone with one drop, and refusing to weld what he can see touching
+//    would read as broken.
+function touching(a, b) {
+  const A = ext(a), B = ext(b);
+  const tol = Math.max(3, radius() * 0.04);
+  return AX.every(x => Math.min(A.max[x], B.max[x]) - Math.max(A.min[x], B.min[x]) > -tol);
+}
+
+function seamBox(a, b) {
+  const A = ext(a), B = ext(b);
+  const lo = new THREE.Vector3(), hi = new THREE.Vector3();
+  AX.forEach(x => { lo[x] = Math.max(A.min[x], B.min[x]);
+                    hi[x] = Math.min(A.max[x], B.max[x]); });
+  return { lo, hi };
+}
+
+// ⭐ TACKS ALONG THE SEAM, not one dot at the middle. Three beads read as a
+//    joint; one bead reads as a bug light. They sit where a welder would put
+//    them, which is the whole reason he will know what they mean.
+function refreshWelds() {
+  tacks.clear();
+  const r = Math.max(1.1, radius() * 0.016);
+  WELDS.forEach(([i, j]) => {
+    const a = SHAPES[i], b = SHAPES[j];
+    if (!a || !b) return;
+    const { lo, hi } = seamBox(a, b);
+    const mid = lo.clone().add(hi).multiplyScalar(0.5);
+    // the longest direction of the overlap is the seam's run
+    let run = 'x';
+    AX.forEach(x => { if (hi[x] - lo[x] > hi[run] - lo[run]) run = x; });
+    const span = Math.max(0, hi[run] - lo[run]);
+    [-0.32, 0, 0.32].forEach(t => {
+      const m = new THREE.Mesh(TACK_G, TACK_M);
+      m.position.copy(mid); m.position[run] += span * t;
+      m.scale.setScalar(r); m.renderOrder = 996;
+      tacks.add(m);
+    });
+  });
+}
+
+// ⭐ ONE DROP, AND WHICH WAY IT GOES IS WHAT HE CAN ALREADY SEE.
+function weldDrop(sh) {
+  const me = SHAPES.indexOf(sh);
+  if (me < 0) return 'nothing there';
+  const held = WELDS.some(([i, j]) => i === me || j === me);
+  if (held) {
+    for (let k = WELDS.length - 1; k >= 0; k--) {
+      if (WELDS[k][0] === me || WELDS[k][1] === me) WELDS.splice(k, 1);
+    }
+    return 'let go';
+  }
+  let n = 0;
+  SHAPES.forEach((o, j) => {
+    if (o === sh || !touching(sh, o)) return;
+    WELDS.push([me, j]); n++;
+  });
+  return n ? ('welded to ' + n) : 'not touching anything';
+}
+
 // ══ UNDO ═════════════════════════════════════════════════════════════════
 // ⛔⛔ RUNG ZERO, AND HE PAID FOR IT BEFORE I BUILT IT. 2026-08-20: *"I totally
 //    blew the bottom circle out... as big as the base of the Egyptian pyramids,
@@ -975,21 +1144,29 @@ const PAST_MAX = 40;
 // ⭐ THE COUNT IS PART OF THE STATE. Without it, undoing a drop would leave
 //    the shape sitting there with its old numbers - which looks exactly like
 //    undo not working, and is worse than undo not existing.
+// ⛔ AND THE WELDS ARE PART OF THE STATE TOO. A weld he could not undo would
+//    be the pyramid bug again wearing a different hat: an act with no way back.
 function snapshot() {
-  past.push(SHAPES.map(sh => sh.kind === 'box'
-    ? { kind:'box', p:sh.p.clone(), s:sh.s.clone() }
-    : { kind:'cyl', p:sh.p.clone(), axis:sh.axis, h:sh.h,
-        a0:sh.a0, b0:sh.b0, a1:sh.a1, b1:sh.b1 }));
+  past.push({
+    shapes: SHAPES.map(sh => sh.kind === 'box'
+      ? { kind:'box', p:sh.p.clone(), s:sh.s.clone() }
+      : { kind:'cyl', p:sh.p.clone(), axis:sh.axis, h:sh.h,
+          a0:sh.a0, b0:sh.b0, a1:sh.a1, b1:sh.b1 }),
+    welds: WELDS.map(w => w.slice()),
+  });
   if (past.length > PAST_MAX) past.shift();
 }
 function undo() {
-  const was = past.pop();
-  if (!was) return;
+  const step = past.pop();
+  if (!step) return;
+  const was = step.shapes;
   while (SHAPES.length > was.length) {          // a drop is undone by removing it
     const gone = SHAPES.pop();
     scene.remove(gone.mesh);
     gone.mesh.geometry.dispose();
   }
+  WELDS.length = 0;
+  step.welds.forEach(w => WELDS.push(w.slice()));
   was.forEach((w, i) => {
     const sh = SHAPES[i];
     sh.p.copy(w.p);
@@ -997,6 +1174,7 @@ function undo() {
     else { sh.h = w.h; sh.a0 = w.a0; sh.b0 = w.b0; sh.a1 = w.a1; sh.b1 = w.b1; }
     rebuild(sh);
   });
+  refreshWelds();
   ghost.visible = false;
   hideDim();
   showHandles(null);
@@ -1010,6 +1188,44 @@ addEventListener('keydown', (e) => {
 });
 
 const cv = renderer.domElement;
+
+// ══ PAN ══════════════════════════════════════════════════════════════════
+// ⭐⭐ JOE, 2026-08-20, unprompted and mid-build: *"right-click and hold and
+//    drag is pan in SolidWorks and others. I keep doing it. That means my
+//    right finger is connected to my brain in that way."*
+//
+// ⭐⭐ THAT IS THE STRONGEST KIND OF SPEC THERE IS, AND IT OUTRANKS MY TASTE.
+//    He is not asking for a feature; he is reporting that his hand already
+//    does it. A tool that ignores twenty years of muscle memory does not feel
+//    neutral to him, it feels WRONG - which is the exact thing this whole
+//    build is measured against: "it does not fight me."
+//
+// ⛔ AND IT DOES NOT BREAK THE ONE RULE. The rule is about the LEFT hand -
+//    drag ON a shape shapes it, drag OFF it turns the view. The right button
+//    was unused and carries no meaning yet, so spending it costs nothing and
+//    adds no mode: nothing is held, nothing is armed, nothing is remembered.
+//
+// ⭐ WHAT PAN ACTUALLY MOVES is what he orbits around, not the camera. Keeping
+//    those the same thing is why double-tap-to-look and pan agree with each
+//    other instead of fighting - pan slides the pivot, and the camera follows
+//    it like it always has.
+let panning = null;
+const PAN_R = new THREE.Vector3(), PAN_U = new THREE.Vector3(), PAN_F = new THREE.Vector3();
+
+cv.addEventListener('contextmenu', (e) => e.preventDefault());
+
+function panBy(e) {
+  // ⭐ pixels to millimetres AT THE PIVOT'S DEPTH, so the model stays under his
+  //    finger whether he is nose-in on a bead or looking at the whole thing.
+  const per = 2 * Math.tan(camera.fov * Math.PI / 360) * orbit.dist / innerHeight;
+  camera.matrixWorld.extractBasis(PAN_R, PAN_U, PAN_F);
+  const move = PAN_R.clone().multiplyScalar(-(e.clientX - panning.x) * per)
+                .add(PAN_U.clone().multiplyScalar((e.clientY - panning.y) * per));
+  pivot.add(move);
+  pivotWant.add(move);                  // ⛔ both, or the ease drags it back
+  if (spot.visible) spot.position.add(move);
+  panning.x = e.clientX; panning.y = e.clientY;
+}
 
 // ⭐ One path for mouse and finger - a dblclick handler would leave touch out,
 //    and touch is where he actually works.
@@ -1028,6 +1244,14 @@ function lookHere(e) {
 }
 
 cv.addEventListener('pointerdown', (e) => {
+  // ⛔ FIRST, BEFORE THE TAP CLOCK. A right-click is not a tap, and letting it
+  //    set lastTap would make his next left-click read as a double-tap.
+  if (e.button === 2) {
+    e.preventDefault();
+    cv.setPointerCapture(e.pointerId);
+    panning = { x:e.clientX, y:e.clientY };
+    return;
+  }
   const now = performance.now();
   const near = Math.hypot(e.clientX-lastXY[0], e.clientY-lastXY[1]) < 24;
   if (now - lastTap < 320 && near) {
@@ -1044,6 +1268,7 @@ cv.addEventListener('pointerdown', (e) => {
 });
 
 cv.addEventListener('pointermove', (e) => {
+  if (panning) { panBy(e); return; }
   if (drag) { moveDrag(e); return; }
   if (turning) {
     orbit.yaw   -= (e.clientX - turning.x) * 0.008;
@@ -1063,7 +1288,7 @@ cv.addEventListener('pointermove', (e) => {
 
 function release(e) {
   try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
-  drag = null; turning = null;
+  drag = null; turning = null; panning = null;
   hideDim();
   snapLines.visible = false;   // ⭐ the proposal is gone once he has decided                      // ⭐ the ruler exists only while he is pulling
 }
