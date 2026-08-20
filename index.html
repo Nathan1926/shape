@@ -124,9 +124,41 @@
          border-radius:5px; border:1px solid rgba(255,179,122,.35);
          font-variant-numeric:tabular-nums; white-space:nowrap; }
   #dim.on { opacity:1; }
+
+  /* ⭐⭐ ON A MOUSE THE TOOLBOX LIVES AT THE SCREEN EDGE; IN GOGGLES IT LIVES
+     IN SPACE near the off-hand. Same idea, two homes - and building the mouse
+     one as if it were the VR one is the mistake this comment exists to stop.
+     ⛔ AND IT IS LOADED, NOT INFINITE. Joe's own metaphor decided the size: a
+     tool changer carries the eight for THIS job, not every tool in the shop.
+     A carousel works because tools live in positions you MEMORISE; at thirty
+     you are spinning and reading, which is worse than a menu. */
+  #box { position:fixed; left:0; top:50%; transform:translateY(-50%);
+         display:flex; flex-direction:column; gap:8px; padding:10px 8px;
+         background:rgba(20,23,27,.72); border-right:1px solid #2a2f36;
+         border-radius:0 12px 12px 0; }
+  #box button { width:56px; height:56px; border:1px solid #333a42;
+                border-radius:10px; background:#1c2026; cursor:grab;
+                display:grid; place-items:center; touch-action:none; }
+  #box button:active { cursor:grabbing; }
+  #box button svg { width:30px; height:30px; stroke:#c9d1d9; fill:none;
+                    stroke-width:1.6; }
+  #box button.armed { border-color:#ffb37a; background:#2a2119; }
+  #box button.armed svg { stroke:#ffb37a; }
 </style>
 
 <div id="dim"></div>
+
+<!-- ⭐ SHAPES, NOT WORDS. He works in a headset eventually, where reading is
+     unpleasant, and the no-text rule was his from the start. A picture of the
+     thing is the only label that survives the move into goggles. -->
+<div id="box">
+  <button data-kind="box" title="block">
+    <svg viewBox="0 0 32 32"><path d="M6 11l10-5 10 5v10l-10 5-10-5z"/>
+      <path d="M6 11l10 5 10-5M16 16v10"/></svg></button>
+  <button data-kind="cyl" title="cylinder">
+    <svg viewBox="0 0 32 32"><ellipse cx="16" cy="9" rx="9" ry="4"/>
+      <path d="M7 9v14M25 9v14"/><path d="M7 23a9 4 0 0 0 18 0"/></svg></button>
+</div>
 
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
@@ -147,6 +179,15 @@ const SHAPES = [
 ];
 const FLOOR = 5;          // nothing may be pushed through itself
 const SEG = 48;           // barrel segments - looks round, stays cheap
+
+// ⭐ ONE PLACE KNOWS WHAT A NEW SHAPE LOOKS LIKE. Every future tool in the
+//    carousel adds a line here and nothing else changes.
+function makeShape(kind, at, size) {
+  return kind === 'box'
+    ? { kind:'box', p:at.clone(), s:new THREE.Vector3(size, size*0.7, size*0.8) }
+    : { kind:'cyl', p:at.clone(), axis:'y', h:size,
+        a0:size*0.38, b0:size*0.38, a1:size*0.38, b1:size*0.38 };
+}
 
 const scene    = new THREE.Scene();
 const renderer = new THREE.WebGLRenderer({ antialias:true });
@@ -678,6 +719,60 @@ function moveDrag(e) {
   showHandles(sh.kind === 'cyl' ? sh : null);
 }
 
+// ══ THE TOOLBOX ══════════════════════════════════════════════════════════
+// ⛔ DRAG IT OUT AND LET GO - no click-then-click. A click-to-arm-then-click-to-
+//    place is a MODE, and the whole tool has none. Pick it up, drop it, done.
+// ⭐ WHERE IT LANDS: on the face under the cursor if there is one, sitting on
+//    top of it rather than through it. Otherwise on the ground plane. He said
+//    "drop the shape onto the face where I want it, or just position it."
+let carrying = null;
+
+function groundOrFace(e) {
+  toNdc(e);
+  ray.setFromCamera(ptr, camera);
+  const hit = ray.intersectObjects(SHAPES.map(x => x.mesh), false)[0];
+  if (hit) return { at:hit.point.clone(), n:hit.face.normal.clone()
+                      .transformDirection(hit.object.matrixWorld) };
+  // the grid, so a dropped thing has somewhere to be
+  const plane = new THREE.Plane(new THREE.Vector3(0,1,0), 150);
+  const at = new THREE.Vector3();
+  return ray.ray.intersectPlane(plane, at)
+    ? { at, n:new THREE.Vector3(0,1,0) }
+    : { at:pivot.clone(), n:new THREE.Vector3(0,1,0) };
+}
+
+document.querySelectorAll('#box button').forEach(btn => {
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    btn.setPointerCapture(e.pointerId);
+    carrying = { kind:btn.dataset.kind, btn };
+    btn.classList.add('armed');
+  });
+  btn.addEventListener('pointerup', (e) => {
+    if (!carrying) return;
+    const kind = carrying.kind;
+    carrying.btn.classList.remove('armed');
+    try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
+    carrying = null;
+    // ⛔ let go over the strip itself = he changed his mind. Not an error, and
+    //    not a shape dumped behind the toolbox where he cannot reach it.
+    if (e.clientX < 84) return;
+
+    snapshot();
+    const size = Math.max(24, radius() * 0.45);
+    const spot = groundOrFace(e);
+    const sh = makeShape(kind, spot.at, size);
+    // ⭐ sit ON the surface, not half inside it - a shape that lands buried
+    //    reads as a bug even when the numbers are right
+    const half = sh.kind === 'box'
+      ? Math.abs(spot.n.x)*sh.s.x/2 + Math.abs(spot.n.y)*sh.s.y/2 + Math.abs(spot.n.z)*sh.s.z/2
+      : sh.h/2;
+    sh.p.add(spot.n.multiplyScalar(half));
+    SHAPES.push(sh);
+    rebuild(sh);
+  });
+});
+
 // ══ UNDO ═════════════════════════════════════════════════════════════════
 // ⛔⛔ RUNG ZERO, AND HE PAID FOR IT BEFORE I BUILT IT. 2026-08-20: *"I totally
 //    blew the bottom circle out... as big as the base of the Egyptian pyramids,
@@ -687,6 +782,9 @@ function moveDrag(e) {
 //    worse than having no undo at all.
 const past = [];
 const PAST_MAX = 40;
+// ⭐ THE COUNT IS PART OF THE STATE. Without it, undoing a drop would leave
+//    the shape sitting there with its old numbers - which looks exactly like
+//    undo not working, and is worse than undo not existing.
 function snapshot() {
   past.push(SHAPES.map(sh => sh.kind === 'box'
     ? { kind:'box', p:sh.p.clone(), s:sh.s.clone() }
@@ -697,6 +795,11 @@ function snapshot() {
 function undo() {
   const was = past.pop();
   if (!was) return;
+  while (SHAPES.length > was.length) {          // a drop is undone by removing it
+    const gone = SHAPES.pop();
+    scene.remove(gone.mesh);
+    gone.mesh.geometry.dispose();
+  }
   was.forEach((w, i) => {
     const sh = SHAPES[i];
     sh.p.copy(w.p);
