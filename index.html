@@ -3,104 +3,106 @@
 <!--
   ══ SHAPE ═════════════════════════════════════════════════════════════════
   Joe's brief, 2026-08-20: "I want a brainstorming tool, not a CAD tool. No
-  dimensions, no precision, no text. ... The question is whether shaping things
+  dimensions, no precision, no text... The question is whether shaping things
   directly feels right to me or feels stupid, and that is answerable in a day."
+  Answered the same day: "Dude, you NAILED that. First try."
 
-  ⛔ WHAT THIS IS NOT: not modelling, not measuring, not a file format, not a
-     step in the toolchain. HIS TEST: "If it ever needs a dimension box, it has
-     drifted." So there is no number anywhere on this page, on purpose.
+  ⭐ ONE RULE FOR THE HAND, BECAUSE HE CANNOT USE FINE MOTOR CONTROL:
+        drag ON a shape     -> push, pull, or squeeze it
+        drag OFF a shape    -> turn the view
+        double-tap a spot   -> that spot becomes what you orbit and zoom around
+     No modes, no modifier keys, nothing to hold down.
 
-  ⛔ THE LOOSENESS IS THE FEATURE, NOT A SHORTCUT. His words: push-pull "makes a
-     poor design tool precisely because it is loose. That looseness is what I
-     want. Same behaviour, different job. Do not tighten it."
+  ⭐⭐ CAD GIVES YOU NOUNS - extrude, revolve, loft. You must know the noun
+     before you can want it. A KID'S TOOLBOX IS VERBS - cut it, bend it,
+     squeeze it, stick it together. Joe's framing, and it is the test for every
+     future tool: if it needs a name he would have to be taught, it belongs in
+     the other program.
 
-  ⭐ ONE RULE FOR THE MOUSE, BECAUSE HE CANNOT USE FINE MOTOR CONTROL:
-        drag ON the shape   -> push or pull that face
-        drag OFF the shape  -> turn the view
-     No modes, no modifier keys, no buttons. Nothing to hold down.
+  ══ THE SPINE, 2026-08-20 ════════════════════════════════════════════════
+  ⛔ WHY THIS REWRITE HAPPENED: the first version was ONE box - six numbers.
+     Every rung on the list (toolbox, weld, snap, deform, cut) needs the same
+     change first: one shape becomes A LIST of shapes. Starting parallel work
+     before that existed would have been five men building parts to five
+     different drawings.
 
-  ⚠️ THE THING THAT IS FAKED, STATED UP FRONT BECAUSE HE ASKED FOR IT:
-     THERE IS NO SOLID UNDERNEATH. This is six numbers - the position of six
-     planes. Dragging a face edits one number. That is genuinely push-pull for
-     one box and it is a dead end for anything past it: a second shape, a cut,
-     or a fuse all need a real B-rep and this representation gets thrown away.
-     It answers his question honestly and it does not grow.
+  ⭐⭐ A SHAPE IS A HANDFUL OF NUMBERS, NEVER A MESH. The mesh is what you see;
+     the numbers are what the thing IS. That is why dragging a face can stay
+     honest - you are editing a number, not pushing triangles around.
 
-  ⭐ Quest 3 later: three.js carries WebXR, so hands are a later rung on THIS
-     page rather than a separate program. Nothing here is built for VR now.
+  ⭐ AND A CONE IS NOT A NEW SHAPE. Joe, 2026-08-20: *"I could grab it and
+     squeeze the one end of the cylinder and pull it up, like drawing up a
+     cylinder into a cone."* A cone is A CYLINDER WITH TWO RADII. Squeeze one
+     end to nothing and you have a point; squeeze it partway and you have a
+     truncated cone. Nothing new underneath. DEFORM was the cheapest verb on
+     the whole list and it came out of his own hands.
+
+  ⚠️ WHAT IS STILL FAKED, STATED PLAINLY: shapes do not know about each other.
+     No weld, no snap, no cut. Those are the next rungs and each is named below
+     with what it costs. ⛔ CUT is the one that kills this representation, and
+     it does it quietly if nobody says so.
 
   ══ THE NEXT RUNGS, DESIGNED IN CONVERSATION 2026-08-20 ═══════════════════
-  Not a plan, not a promise. This is what he and I worked out while he was
-  using it, written here because it will otherwise evaporate. ⛔ IN ORDER OF
-  WHAT IT COSTS, not in order of what sounds good.
+  In order of what it COSTS, not of what sounds good.
 
-  ⭐⭐ 1 · TOOLBOX AND DROP - cheap. A small set of shapes; drop one on a face
-     or into space. ⛔ ON A MOUSE THE TOOLBOX LIVES AT THE SCREEN EDGE, IN
-     GOGGLES IT LIVES IN SPACE near the off-hand. Same idea, two homes -
-     building the mouse version as if it were the VR one is the mistake.
+  ⭐⭐ 1 · TOOLBOX AND DROP - cheap. ⛔ ON A MOUSE THE TOOLBOX LIVES AT THE
+     SCREEN EDGE; IN GOGGLES IT LIVES IN SPACE near the off-hand. Same idea,
+     two homes - building the mouse one as if it were the VR one is the error.
+     ⭐ AND THE CAROUSEL MUST BE LOADED, NOT INFINITE. It works because tools
+     live in positions you MEMORISE. At thirty tools you are spinning and
+     reading, which is worse than a menu. His own metaphor has the answer: a
+     tool changer carries the eight for THIS job. Library infinite, carousel
+     small. Six to ten is a guess only his hands can settle.
 
-  ⭐⭐ 2 · WELD - cheap, AND IT IS WHY THE SIX-NUMBERS FAKE SURVIVES. Joe:
-     *"a weld button... it'll lock it in place until I tell it to unweld."*
-     ⭐ THAT IS A CONSTRAINT, NOT A BOOLEAN. Two shapes stay themselves and
-     agree to move together. Each keeps its own numbers. A FUSE would make one
-     body and need real topology; a weld needs a note saying "these travel as
-     one." ⛔ JOIN IS CHEAP. SUBTRACT IS EXPENSIVE. Know which you reached for.
+  ⭐⭐ 2 · WELD - cheap, AND IT IS WHY THIS REPRESENTATION SURVIVES. Joe: *"a
+     weld button... it'll lock it in place until I tell it to unweld."* THAT IS
+     A CONSTRAINT, NOT A BOOLEAN. Two shapes stay themselves and agree to move
+     together. A FUSE would make one body and need real topology.
+     ⛔ JOIN IS CHEAP. SUBTRACT IS EXPENSIVE.
 
-  ⭐ 3 · SNAP AS A PROPOSAL - his SmartMates instinct, and it belongs here more
-     than in SolidWorks. ⭐ Rough placement is illegible without it: everything
-     you build sits slightly floating and you cannot tell if you meant it.
-     ⛔ A SNAP THAT OVERRIDES HIM IS THE TOOL FIGHTING HIM. It proposes; letting
-     go decides. ⚠️ And there must be a way to say "no, I meant it there" -
-     ⭐ HE CANNOT HOLD A KEY, so the answer is: shove past it and it lets go.
-     ⚠️ VR needs a much bigger tolerance (hands shake millimetres) and the snap
-     must be VISIBLE before it commits, because there is no click to feel.
+  ⭐ 3 · SNAP AS A PROPOSAL - his SmartMates instinct. Rough placement is
+     illegible without it; everything sits slightly floating and you cannot
+     tell if you meant it. ⛔ A SNAP THAT OVERRIDES HIM IS THE TOOL FIGHTING
+     HIM - it proposes, letting go decides. ⭐ HE CANNOT HOLD A KEY, so the
+     escape is: shove past it and it lets go. ⚠️ VR needs far bigger tolerance
+     (hands shake millimetres) and the snap must be VISIBLE before it commits,
+     because there is no click to feel.
 
-  ⛔⛔ 4 · CUT - THIS IS WHERE THE FAKE DIES, and it dies quietly if nobody
-     says so. After a boolean the result is triangles: there is no number
-     behind a face any more, so PUSH-PULL - the thing he likes - STOPS WORKING.
-     ⭐ THE WAY OUT IS TO KEEP THE CUT AS A STEP, NOT A RESULT: box stays six
-     numbers, cutter stays its own, subtraction re-runs whenever either moves.
-     Then he can still grab the box face AND grab the hole to resize it.
-     ⚠️ THAT IS A FEATURE TREE AND IT MUST BE NAMED, NOT SLID INTO. His rule
-     was "if it ever needs a dimension box it has drifted" - a tree is the same
-     road. ⭐ It stays honest only while the tree is INVISIBLE: he drags a
-     cylinder in, says subtract, and gets a hole he can still grab. It becomes
-     CAD the day the tree is something he has to manage.
+  ⛔⛔ 4 · CUT - WHERE THIS REPRESENTATION DIES. After a boolean the result is
+     triangles: no number behind a face, so PUSH-PULL STOPS WORKING - the thing
+     he likes. ⭐ THE WAY OUT IS TO KEEP THE CUT AS A STEP, NOT A RESULT: box
+     stays numbers, cutter stays numbers, the subtraction re-runs when either
+     moves. Then he can grab the box AND grab the hole. ⚠️ THAT IS A FEATURE
+     TREE AND IT MUST BE NAMED, NOT SLID INTO - his rule was "if it ever needs
+     a dimension box it has drifted", and a tree is the same road. It stays
+     honest only while the tree is INVISIBLE.
 
-  ⭐⭐ 5 · SWEEP - AND THIS IS THE FEATURE THAT EARNS THE HEADSET. His case:
-     a curved wire passage in a printed part - model the void, subtract it.
-     Square section gives a square hole, round gives round, bend the path and
-     the hole bends. One tool, all three. ⛔ A path is the one thing he cannot
-     draw with a mouse, and he has said so for months. ⭐ IN GOGGLES HE JUST
-     MOVES HIS HAND WHERE THE WIRE GOES. Everything else on this list is merely
-     POSSIBLE with hands. This one is BETTER with them - so it is not a
-     nice-to-have on the VR rung, it is the reason to bother with the rung.
+  ⭐⭐ 5 · SWEEP - THE FEATURE THAT EARNS THE HEADSET. His case: a curved wire
+     passage in a printed part - model the void, subtract it. Square section
+     gives a square hole, bend the path and the hole bends. ⛔ A path is the
+     one thing he cannot draw with a mouse and has said so for months. ⭐ IN
+     GOGGLES HE JUST MOVES HIS HAND WHERE THE WIRE GOES. Everything else here
+     is merely POSSIBLE with hands; this one is BETTER with them.
 
-  ⭐ 6 · THE TOOL CAROUSEL - his idea, and the two reasons it is right are
-     separable: hands stay LOW (which decides whether the goggles are wearable
-     for an hour) and a flick is COARSE (no fine motor control anywhere in it).
-     ⛔⛔ BUT "ALMOST INFINITE" IS THE TRAP. A carousel works because tools live
-     in positions you MEMORISE - you do not read it, your hand goes to four
-     o'clock. At thirty tools you are spinning and reading, which is worse than
-     a menu. ⭐ HIS OWN METAPHOR HAS THE ANSWER: A TOOL CHANGER IS LOADED. The
-     machine carries the eight for this job, not every tool in the shop. So:
-     library infinite, carousel small and chosen. Six to ten is a guess, and
-     only his hands can settle it.
+  ⛔ 6 · THE KNIFE IS A DOOR, NOT A TOOL. Carving leaves parametric land for
+     good - the shape becomes clay and can never be grabbed by a face again.
+     That may be right for making a picture to hand Mac. It must be a door he
+     knows he is opening.
 
   ⚠️ WHAT VR ACTUALLY CHANGES, since he has never worn one and asked:
      ⭐ positioning by hand in real depth is genuinely better than a mouse -
-       that is the thing goggles are good at, and most of this list is not it.
+       that is what goggles are good at, and most of this list is not it.
      ⚠️ precision is WORSE; hands jitter millimetres. Which is exactly why THIS
        tool belongs there and SolidWorks does not.
-     ⛔ arms up = tired in ten minutes. Anything that survives keeps hands low.
-     ⛔ reading in VR is unpleasant. His no-text instinct matters more there.
+     ⛔ arms up = tired in ten minutes. What survives keeps hands low.
+     ⛔ reading in VR is unpleasant. The no-text instinct matters more there.
 -->
 
 <style>
   html, body { margin:0; height:100%; overflow:hidden; background:#15171a; }
   canvas { display:block; touch-action:none; }
-  /* ⭐ The number rides as HTML, not as a texture in the scene - it stays
-     crisp at every zoom and costs nothing. It never takes a click. */
+  /* ⭐ The number rides as HTML, not as a texture in the scene - crisp at every
+     zoom, costs nothing, and never takes a click. */
   #dim { position:fixed; left:0; top:0; pointer-events:none; opacity:0;
          transform:translate(-50%,-50%); transition:opacity .12s;
          font:600 15px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
@@ -115,294 +117,46 @@
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
-// ── the whole model: six planes ──────────────────────────────────────────
-// ⛔ This is the fake. A real solid would be faces, edges and vertices with
-//    topology between them. This is min/max on three axes and nothing else.
-const B = { min: new THREE.Vector3(-30, -18, -22),
-            max: new THREE.Vector3( 30,  18,  22) };
-const FLOOR = 6;   // a face can never be pushed through its opposite number
+// ══ THE MODEL ════════════════════════════════════════════════════════════
+// ⭐⭐ Numbers, never meshes. A box is a centre and a size. A cylinder is a
+//    centre, an axis, a height and TWO radii - which is why a cone needs no
+//    new kind. The mesh hanging off each one is only what you look at.
+const SHAPES = [
+  { kind:'box', p:new THREE.Vector3(-34, 0, 0), s:new THREE.Vector3(52, 34, 40) },
+  { kind:'cyl', p:new THREE.Vector3( 42, 0, 0), axis:'y', h:52, r0:20, r1:20 },
+];
+const FLOOR = 5;          // nothing may be pushed through itself
+const SEG = 48;           // barrel segments - looks round, stays cheap
 
 const scene    = new THREE.Scene();
 const renderer = new THREE.WebGLRenderer({ antialias:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 document.body.appendChild(renderer.domElement);
-
-const camera = new THREE.PerspectiveCamera(42, 1, 1, 4000);
+const camera = new THREE.PerspectiveCamera(42, 1, 1, 6000);
 
 // ⭐ A GROUND GRID IS NOT DECORATION. A solid floating in a void has no depth
-//    cue at all, and "does it fight me" cannot be answered if he cannot tell
-//    which way the thing is facing. Faint on purpose.
-const grid = new THREE.GridHelper(600, 30, 0x2a2f36, 0x1e2228);
-grid.position.y = -140;
+//    cue, and "does it fight me" cannot be answered if he cannot tell which
+//    way the thing faces. Faint on purpose.
+const grid = new THREE.GridHelper(700, 35, 0x2a2f36, 0x1e2228);
+grid.position.y = -150;
 scene.add(grid);
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.55));
 const key = new THREE.DirectionalLight(0xfff4e6, 2.1);
-key.position.set(0.6, 1.0, 0.8);
-scene.add(key);
+key.position.set(0.6, 1.0, 0.8); scene.add(key);
 const rim = new THREE.DirectionalLight(0x9fb6d0, 0.7);
-rim.position.set(-0.7, 0.3, -0.6);
-scene.add(rim);
+rim.position.set(-0.7, 0.3, -0.6); scene.add(rim);
 
-const mat = new THREE.MeshStandardMaterial({
-  color: 0x9aa3ad, roughness: 0.62, metalness: 0.08, flatShading: false });
-const solid = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), mat);
-scene.add(solid);
+const MAT = new THREE.MeshStandardMaterial({
+  color:0x9aa3ad, roughness:0.62, metalness:0.08 });
 
-// the face the cursor is over, drawn as a translucent skin so he knows what
-// he is about to grab. ⭐ Feedback, not polish - without it the first drag is
-// a guess, and a tool you have to guess at is a tool that fights you.
-const ghost = new THREE.Mesh(
-  new THREE.PlaneGeometry(1,1),
+// the face under the cursor, drawn as a translucent skin. ⭐ Feedback, not
+// polish - without it the first drag is a guess, and a tool you guess at is a
+// tool that fights you.
+const ghost = new THREE.Mesh(new THREE.PlaneGeometry(1,1),
   new THREE.MeshBasicMaterial({ color:0xffb37a, transparent:true, opacity:0.22,
-                                depthTest:true, side:THREE.DoubleSide }));
-ghost.visible = false;
-scene.add(ghost);
-
-// ── THE RULER ────────────────────────────────────────────────────────────
-// ⭐⭐ HIS ASK, 2026-08-20: *"when I touch the face and pull on it, a grid ruler
-//    thing appears at one corner, a visible corner, maybe a back corner where
-//    I'm not covering it up with my finger, and it automatically pulls a
-//    measurement from the opposing face."* SolidWorks does this in its live 3D
-//    and he says it is the one thing that works well in there.
-//
-// ⛔ THIS IS NOT A DIMENSION BOX AND MUST NEVER BECOME ONE. His own rule stands:
-//    *"If it ever needs a dimension box, it has drifted."* A box is where you
-//    TYPE. This is read-only, it exists only while he is pulling, and it takes
-//    no input. Feedback, not entry.
-//
-// ⭐ ONE DECIMAL INCH, ON PURPOSE. Tenths are coarse enough to read as "about
-//    so big" rather than as a specification. Precision here would be a lie
-//    about what this tool is.
-const DIM_COLOR = 0xffb37a;
-const dimLines = new THREE.LineSegments(
-  new THREE.BufferGeometry(),
-  new THREE.LineBasicMaterial({ color:DIM_COLOR, transparent:true, opacity:0.75,
-                                depthTest:false }));
-dimLines.renderOrder = 999;
-dimLines.visible = false;
-scene.add(dimLines);
-const dimEl = document.getElementById('dim');
-
-const OTHER = { x:['y','z'], y:['x','z'], z:['x','y'] };
-
-// ⭐ PICK THE EDGE HE IS NOT STANDING ON. Of the four edges running along the
-//    drag axis, take the one whose middle lands FURTHEST from the cursor on
-//    screen - that is the back corner he asked for, chosen every frame so it
-//    stays out of the way as he turns the part.
-function farEdge(axis, cursorNdc) {
-  const [a, b] = OTHER[axis];
-  let best = null, bestD = -1;
-  for (const sa of [0, 1]) for (const sb of [0, 1]) {
-    const mid = new THREE.Vector3();
-    mid[axis] = (B.min[axis] + B.max[axis]) / 2;
-    mid[a] = sa ? B.max[a] : B.min[a];
-    mid[b] = sb ? B.max[b] : B.min[b];
-    const sp = mid.clone().project(camera);
-    const d = (sp.x - cursorNdc.x) ** 2 + (sp.y - cursorNdc.y) ** 2;
-    if (d > bestD) { bestD = d; best = { a, b, sa, sb }; }
-  }
-  return best;
-}
-
-function showDim(axis, cursorNdc) {
-  const e = farEdge(axis, cursorNdc);
-  const span = new THREE.Vector3().subVectors(B.max, B.min);
-  // push the witness line a little further out from the body so it does not
-  // sit buried in the silhouette
-  const out = Math.max(6, Math.min(span.x, span.y, span.z) * 0.22);
-  const oa = (e.sa ? 1 : -1) * out, ob = (e.sb ? 1 : -1) * out;
-
-  const p = (t) => {
-    const v = new THREE.Vector3();
-    v[axis] = t ? B.max[axis] : B.min[axis];
-    v[e.a] = (e.sa ? B.max[e.a] : B.min[e.a]) + oa;
-    v[e.b] = (e.sb ? B.max[e.b] : B.min[e.b]) + ob;
-    return v;
-  };
-  const corner = (t) => {           // where the witness line starts, on the body
-    const v = new THREE.Vector3();
-    v[axis] = t ? B.max[axis] : B.min[axis];
-    v[e.a] = e.sa ? B.max[e.a] : B.min[e.a];
-    v[e.b] = e.sb ? B.max[e.b] : B.min[e.b];
-    return v;
-  };
-
-  const A = p(0), Z = p(1), c0 = corner(0), c1 = corner(1);
-  // tick marks, so the ends read as ends rather than as the line running on
-  const t = new THREE.Vector3();
-  t[e.a] = oa * 0.35; t[e.b] = ob * 0.35; t[axis] = 0;
-  const pts = [
-    A, Z,                                              // the measure itself
-    c0, A, c1, Z,                                      // witness lines
-    A.clone().sub(t), A.clone().add(t),                // end ticks
-    Z.clone().sub(t), Z.clone().add(t),
-  ];
-  const arr = new Float32Array(pts.length * 3);
-  pts.forEach((v, i) => { arr[i*3] = v.x; arr[i*3+1] = v.y; arr[i*3+2] = v.z; });
-  dimLines.geometry.dispose();
-  dimLines.geometry = new THREE.BufferGeometry();
-  dimLines.geometry.setAttribute('position', new THREE.BufferAttribute(arr, 3));
-  dimLines.visible = true;
-
-  // ⭐ 1 world unit = 1 mm, shown in inches. The unit is a convention, not a
-  //    measurement - nothing here was ever dimensioned.
-  const inches = (B.max[axis] - B.min[axis]) / 25.4;
-  dimEl.textContent = inches.toFixed(1) + '"';
-  const mid = new THREE.Vector3().addVectors(A, Z).multiplyScalar(0.5).project(camera);
-  dimEl.style.left = ((mid.x * 0.5 + 0.5) * innerWidth) + 'px';
-  dimEl.style.top  = ((-mid.y * 0.5 + 0.5) * innerHeight) + 'px';
-  dimEl.classList.add('on');
-}
-
-function hideDim() {
-  dimLines.visible = false;
-  dimEl.classList.remove('on');
-}
-
-function rebuild() {
-  const s = new THREE.Vector3().subVectors(B.max, B.min);
-  solid.geometry.dispose();
-  solid.geometry = new THREE.BoxGeometry(s.x, s.y, s.z);
-  solid.position.copy(B.min).add(B.max).multiplyScalar(0.5);
-}
-rebuild();
-
-// ── the view ─────────────────────────────────────────────────────────────
-const orbit = { yaw: 0.72, pitch: 0.46, dist: 190 };
-
-// KEEP THE SIZE HE PICKED, NOT A SIZE I PICKED.
-// Joe, 2026-08-20: "can it do auto-fit on the zoom? I like that size right
-// there." Auto-fit would choose a framing for him. Instead: remember the ratio
-// of camera distance to how big the shape is, and hold THAT. He zooms once to
-// what he likes; the tool keeps it as the shape grows and shrinks under him.
-//
-// AND IT EASES, IT NEVER SNAPS. His one hard test is whether the tool fights
-// him. A camera that jumps while his hand is still moving is the tool fighting.
-let framing = null;              // dist / radius, set the first time we know both
-const EASE = 0.12;               // per frame - fast enough to keep up, slow
-                                 // enough that it reads as the view settling
-function radius() {
-  const s = new THREE.Vector3().subVectors(B.max, B.min);
-  return s.length() * 0.5;
-}
-// ⚠️ When he has pointed at a detail, the framing he wants is relative to THAT,
-//    not to the whole part - otherwise growing the box shoves his close-up away.
-function framingRadius() {
-  return spot.visible ? Math.max(radius() * 0.18, 4) : radius();
-}
-function holdFraming() {
-  const r = framingRadius();
-  if (framing === null) { framing = orbit.dist / r; return; }
-  const want = framing * r;
-  orbit.dist += (want - orbit.dist) * EASE;
-}
-// WHAT YOU ORBIT AROUND IS A CHOICE, AND IT WAS THE MISSING HALF.
-// Joe, 2026-08-20: "as I get into more complex whatevers, I might want to zoom
-// in and look closely at a section, a detail, a relationship between two edges."
-// Zoom moves you toward the CENTRE. Looking at a detail means moving the centre
-// TO the detail. With the camera nailed to the origin, zooming in on a corner
-// just fills the screen with the middle of the part.
-//
-// DOUBLE-TAP THE SPOT. No menu, no key to hold, nothing to aim at but the thing
-// he already wants to look at - which is the same one-rule discipline as the
-// rest of this page. Double-tap off the shape and it goes back to the whole.
-const pivot = new THREE.Vector3(0, 0, 0);
-const pivotWant = new THREE.Vector3(0, 0, 0);
-
-function placeCamera() {
-  // eased, never snapped - the view settles toward the new centre instead of
-  // cutting to it, so it never reads as the tool taking the wheel off him
-  pivot.lerp(pivotWant, 0.14);
-  const cp = Math.cos(orbit.pitch);
-  camera.position.set(pivot.x + Math.sin(orbit.yaw) * cp * orbit.dist,
-                      pivot.y + Math.sin(orbit.pitch)     * orbit.dist,
-                      pivot.z + Math.cos(orbit.yaw) * cp * orbit.dist);
-  camera.lookAt(pivot);
-}
-
-// a small marker so he can see WHERE he told it to look. It is feedback, not
-// decoration - without it a pivot he set by accident is invisible and the view
-// just feels wrong for no reason he can point at.
-const spot = new THREE.Mesh(
-  new THREE.SphereGeometry(1, 16, 12),
-  new THREE.MeshBasicMaterial({ color:0xffb37a, transparent:true, opacity:0.85,
-                                depthTest:false }));
-spot.renderOrder = 998;
-spot.visible = false;
-scene.add(spot);
-
-function lookHere(e) {
-  const f = faceUnder(e);
-  if (f) {
-    pivotWant.copy(f.point);
-    spot.position.copy(f.point);
-    spot.scale.setScalar(Math.max(0.8, radius() * 0.018));
-    spot.visible = true;
-  } else {
-    // off the shape: back to the whole thing
-    pivotWant.copy(B.min).add(B.max).multiplyScalar(0.5);
-    spot.visible = false;
-  }
-}
-
-function resize() {
-  const w = innerWidth, h = innerHeight;
-  renderer.setSize(w, h);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-}
-addEventListener('resize', resize);
-resize();
-
-// ── picking ──────────────────────────────────────────────────────────────
-const ray = new THREE.Raycaster();
-const ptr = new THREE.Vector2();
-function toNdc(e) {
-  ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
-}
-
-// The box is axis-aligned and never rotated, so the hit triangle's own normal
-// IS the axis. ⭐ That is the one thing the fake representation buys us.
-function faceUnder(e) {
-  toNdc(e);
-  ray.setFromCamera(ptr, camera);
-  const hit = ray.intersectObject(solid, false)[0];
-  if (!hit) return null;
-  const n = hit.face.normal;
-  const axis = Math.abs(n.x) > 0.5 ? 'x' : Math.abs(n.y) > 0.5 ? 'y' : 'z';
-  return { axis, sign: n[axis] > 0 ? 1 : -1, point: hit.point.clone() };
-}
-
-function showGhost(f) {
-  if (!f) { ghost.visible = false; return; }
-  const s = new THREE.Vector3().subVectors(B.max, B.min);
-  const c = new THREE.Vector3().copy(B.min).add(B.max).multiplyScalar(0.5);
-  const lift = 0.35;                       // sit just proud of the real face
-  ghost.rotation.set(0,0,0);
-  if (f.axis === 'x') {
-    ghost.geometry.dispose(); ghost.geometry = new THREE.PlaneGeometry(s.z, s.y);
-    ghost.rotation.y = Math.PI/2;
-    ghost.position.set((f.sign>0?B.max.x:B.min.x) + f.sign*lift, c.y, c.z);
-  } else if (f.axis === 'y') {
-    ghost.geometry.dispose(); ghost.geometry = new THREE.PlaneGeometry(s.x, s.z);
-    ghost.rotation.x = Math.PI/2;
-    ghost.position.set(c.x, (f.sign>0?B.max.y:B.min.y) + f.sign*lift, c.z);
-  } else {
-    ghost.geometry.dispose(); ghost.geometry = new THREE.PlaneGeometry(s.x, s.y);
-    ghost.position.set(c.x, c.y, (f.sign>0?B.max.z:B.min.z) + f.sign*lift);
-  }
-  ghost.visible = true;
-}
-
-// ── dragging a face ──────────────────────────────────────────────────────
-// ⭐ THE FACE FOLLOWS THE CURSOR, it does not follow a scaled mouse delta.
-//    Build a plane that contains the face's travel axis and faces the camera
-//    as squarely as it can, then just read where the cursor lands on it. That
-//    is why it feels like pushing the face rather than driving a slider.
-let drag = null, turning = null;
-const dragPlane = new THREE.Plane();
-const scratch   = new THREE.Vector3();
+                                side:THREE.DoubleSide }));
+ghost.visible = false; scene.add(ghost);
 
 function axisVec(a) {
   return a === 'x' ? new THREE.Vector3(1,0,0)
@@ -410,57 +164,333 @@ function axisVec(a) {
                    : new THREE.Vector3(0,0,1);
 }
 
-function beginDrag(f) {
-  const a = axisVec(f.axis);
-  const toCam = new THREE.Vector3().subVectors(camera.position, f.point).normalize();
-  // plane normal = the part of the camera direction perpendicular to the axis
-  const n = toCam.clone().sub(a.clone().multiplyScalar(toCam.dot(a)));
-  if (n.lengthSq() < 1e-6) n.set(0,1,0);      // dead-on: any perpendicular does
-  n.normalize();
-  dragPlane.setFromNormalAndCoplanarPoint(n, f.point);
-  drag = { ...f, axis3: a,
-           start: f.point[f.axis],
-           was: f.sign > 0 ? B.max[f.axis] : B.min[f.axis] };
+// ⭐ ONE FUNCTION TURNS NUMBERS INTO A MESH, and it is the only place that
+//    knows how. Every edit anywhere just changes a number and calls this.
+function rebuild(sh) {
+  if (sh.mesh) { sh.mesh.geometry.dispose(); scene.remove(sh.mesh); }
+  let g;
+  if (sh.kind === 'box') {
+    g = new THREE.BoxGeometry(sh.s.x, sh.s.y, sh.s.z);
+  } else {
+    // three.js builds cylinders up Y and takes the TOP radius first. The two
+    // radii differing is the whole of "deform".
+    g = new THREE.CylinderGeometry(Math.max(sh.r1, 0.001),
+                                   Math.max(sh.r0, 0.001), sh.h, SEG, 1, false);
+  }
+  sh.mesh = new THREE.Mesh(g, MAT.clone());
+  sh.mesh.position.copy(sh.p);
+  if (sh.kind === 'cyl') {
+    if (sh.axis === 'x') sh.mesh.rotation.z = Math.PI / 2;
+    if (sh.axis === 'z') sh.mesh.rotation.x = Math.PI / 2;
+  }
+  sh.mesh.userData.shape = sh;
+  scene.add(sh.mesh);
+}
+SHAPES.forEach(rebuild);
+
+function bounds() {
+  const b = new THREE.Box3();
+  SHAPES.forEach(s => b.expandByObject(s.mesh));
+  return b;
+}
+
+// ══ THE VIEW ═════════════════════════════════════════════════════════════
+const orbit = { yaw:0.72, pitch:0.42, dist:260 };
+
+// ⭐ WHAT YOU ORBIT AROUND IS A CHOICE. Zoom moves you toward the CENTRE;
+//    looking at a detail means moving the centre TO the detail. Double-tap the
+//    spot. Joe, on getting it: "That is a big fix for something that has
+//    annoyed me on SolidWorks for a decade or more."
+const pivot = new THREE.Vector3();
+const pivotWant = new THREE.Vector3();
+
+const spot = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12),
+  new THREE.MeshBasicMaterial({ color:0xffb37a, transparent:true, opacity:0.85,
+                                depthTest:false }));
+spot.renderOrder = 998; spot.visible = false; scene.add(spot);
+
+// ⭐ KEEP THE SIZE HE PICKED, NOT A SIZE I PICKED. Joe: "can it do auto-fit on
+//    the zoom? I like that size right there." Auto-fit would choose for him.
+//    This remembers the RATIO of camera distance to how big the thing is and
+//    holds that as shapes grow under his hands. And it EASES, never snaps - a
+//    camera that jumps while his hand is moving is the tool fighting him.
+let framing = null;
+const EASE = 0.12;
+function radius() {
+  const b = bounds();
+  return Math.max(b.getSize(new THREE.Vector3()).length() * 0.5, 1);
+}
+function framingRadius() { return spot.visible ? Math.max(radius() * 0.18, 4) : radius(); }
+function holdFraming() {
+  const r = framingRadius();
+  if (framing === null) { framing = orbit.dist / r; return; }
+  orbit.dist += (framing * r - orbit.dist) * EASE;
+}
+
+function placeCamera() {
+  pivot.lerp(pivotWant, 0.14);
+  const cp = Math.cos(orbit.pitch);
+  camera.position.set(pivot.x + Math.sin(orbit.yaw) * cp * orbit.dist,
+                      pivot.y + Math.sin(orbit.pitch)     * orbit.dist,
+                      pivot.z + Math.cos(orbit.yaw) * cp * orbit.dist);
+  camera.lookAt(pivot);
+}
+(function initPivot(){ bounds().getCenter(pivotWant); pivot.copy(pivotWant); })();
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+// ══ WHAT YOUR HAND IS ON ═════════════════════════════════════════════════
+const ray = new THREE.Raycaster();
+const ptr = new THREE.Vector2();
+function toNdc(e) {
+  ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+}
+
+// ⭐ A HANDLE IS A NUMBER YOU CAN GRAB. Box faces move a wall. A cylinder's
+//    flat ends move its length; its BARREL moves the radius of whichever end
+//    you are nearest - which is exactly "squeeze one end and draw it up".
+function handleUnder(e) {
+  toNdc(e);
+  ray.setFromCamera(ptr, camera);
+  const hit = ray.intersectObjects(SHAPES.map(s => s.mesh), false)[0];
+  if (!hit) return null;
+  const sh = hit.object.userData.shape;
+  const n = hit.face.normal.clone();
+
+  if (sh.kind === 'box') {
+    const axis = Math.abs(n.x) > 0.5 ? 'x' : Math.abs(n.y) > 0.5 ? 'y' : 'z';
+    return { sh, type:'face', axis, sign:n[axis] > 0 ? 1 : -1, point:hit.point };
+  }
+
+  // cylinder: the local normal points along Y on the caps, sideways on the wall
+  const cap = Math.abs(n.y) > 0.7;
+  const local = sh.mesh.worldToLocal(hit.point.clone());
+  const end = local.y > 0 ? 1 : 0;           // 1 = the r1 end, 0 = the r0 end
+  return cap
+    ? { sh, type:'length', end, sign:(n.y > 0 ? 1 : -1), point:hit.point }
+    : { sh, type:'radius', end, point:hit.point };
+}
+
+function showGhost(h) {
+  if (!h) { ghost.visible = false; return; }
+  if (h.sh.kind === 'box') {
+    const s = h.sh.s, c = h.sh.p, lift = 0.3;
+    ghost.rotation.set(0,0,0);
+    ghost.geometry.dispose();
+    if (h.axis === 'x') {
+      ghost.geometry = new THREE.PlaneGeometry(s.z, s.y);
+      ghost.rotation.y = Math.PI/2;
+      ghost.position.set(c.x + h.sign*(s.x/2 + lift), c.y, c.z);
+    } else if (h.axis === 'y') {
+      ghost.geometry = new THREE.PlaneGeometry(s.x, s.z);
+      ghost.rotation.x = Math.PI/2;
+      ghost.position.set(c.x, c.y + h.sign*(s.y/2 + lift), c.z);
+    } else {
+      ghost.geometry = new THREE.PlaneGeometry(s.x, s.y);
+      ghost.position.set(c.x, c.y, c.z + h.sign*(s.z/2 + lift));
+    }
+    ghost.visible = true;
+    return;
+  }
+  // on a cylinder the honest highlight is a ring at the end you have hold of
+  const sh = h.sh, r = h.end ? sh.r1 : sh.r0;
+  ghost.geometry.dispose();
+  ghost.geometry = new THREE.RingGeometry(Math.max(r - 1.6, 0.2), r + 1.6, SEG);
+  const off = axisVec(sh.axis).multiplyScalar((h.end ? 1 : -1) * (sh.h/2 + 0.35));
+  ghost.position.copy(sh.p).add(off);
+  ghost.rotation.set(0,0,0);
+  if (sh.axis === 'y') ghost.rotation.x = Math.PI/2;
+  if (sh.axis === 'x') ghost.rotation.y = Math.PI/2;
+  ghost.visible = true;
+}
+
+// ══ THE RULER ════════════════════════════════════════════════════════════
+// ⛔ NOT A DIMENSION BOX AND MUST NEVER BECOME ONE. His rule: "if it ever needs
+//    a dimension box, it has drifted." A box is where you TYPE. This is
+//    read-only, exists only while he is pulling, and takes no input.
+// ⭐ ONE DECIMAL INCH, ON PURPOSE - "it doesn't have to be accurate except in
+//    maybe one decimal place." Tenths read as "about so big" rather than as a
+//    specification, which is the truth about this tool.
+const dimLines = new THREE.LineSegments(new THREE.BufferGeometry(),
+  new THREE.LineBasicMaterial({ color:0xffb37a, transparent:true, opacity:0.75,
+                                depthTest:false }));
+dimLines.renderOrder = 999; dimLines.visible = false; scene.add(dimLines);
+const dimEl = document.getElementById('dim');
+
+function setDimLine(a, z, tick) {
+  const pts = [a, z, a.clone().sub(tick), a.clone().add(tick),
+                     z.clone().sub(tick), z.clone().add(tick)];
+  const arr = new Float32Array(pts.length * 3);
+  pts.forEach((v,i) => { arr[i*3]=v.x; arr[i*3+1]=v.y; arr[i*3+2]=v.z; });
+  dimLines.geometry.dispose();
+  dimLines.geometry = new THREE.BufferGeometry();
+  dimLines.geometry.setAttribute('position', new THREE.BufferAttribute(arr,3));
+  dimLines.visible = true;
+}
+function label(mm, mid) {
+  dimEl.textContent = (mm / 25.4).toFixed(1) + '"';
+  const p = mid.clone().project(camera);
+  dimEl.style.left = ((p.x*0.5+0.5) * innerWidth) + 'px';
+  dimEl.style.top  = ((-p.y*0.5+0.5) * innerHeight) + 'px';
+  dimEl.classList.add('on');
+}
+const OTHER = { x:['y','z'], y:['x','z'], z:['x','y'] };
+
+function showDim(h) {
+  const sh = h.sh;
+  if (sh.kind === 'box') {
+    // ⭐ PICK THE EDGE HE IS NOT STANDING ON, every frame - of the four running
+    //    along the drag axis, whichever lands furthest from the cursor.
+    const ax = h.axis, [a,b] = OTHER[ax];
+    let best = null, bestD = -1;
+    for (const sa of [0,1]) for (const sb of [0,1]) {
+      const m = sh.p.clone();
+      m[a] += (sa?1:-1) * sh.s[a]/2;
+      m[b] += (sb?1:-1) * sh.s[b]/2;
+      const sp = m.project(camera);
+      const d = (sp.x-ptr.x)**2 + (sp.y-ptr.y)**2;
+      if (d > bestD) { bestD = d; best = {a,b,sa,sb}; }
+    }
+    const out = Math.max(6, Math.min(sh.s.x, sh.s.y, sh.s.z) * 0.22);
+    const mk = (t) => {
+      const v = sh.p.clone();
+      v[ax] += (t?1:-1) * sh.s[ax]/2;
+      v[best.a] += (best.sa?1:-1) * (sh.s[best.a]/2 + out);
+      v[best.b] += (best.sb?1:-1) * (sh.s[best.b]/2 + out);
+      return v;
+    };
+    const A = mk(0), Z = mk(1);
+    const tick = new THREE.Vector3();
+    tick[best.a] = (best.sa?1:-1) * out * 0.3;
+    tick[best.b] = (best.sb?1:-1) * out * 0.3;
+    setDimLine(A, Z, tick);
+    label(sh.s[ax], A.clone().add(Z).multiplyScalar(0.5));
+    return;
+  }
+
+  const av = axisVec(sh.axis);
+  const side = new THREE.Vector3(av.y, av.z, av.x);
+  if (h.type === 'length') {
+    const off = Math.max(6, Math.max(sh.r0, sh.r1) * 1.35);
+    const s2 = side.clone().multiplyScalar(off);
+    const A = sh.p.clone().sub(av.clone().multiplyScalar(sh.h/2)).add(s2);
+    const Z = sh.p.clone().add(av.clone().multiplyScalar(sh.h/2)).add(s2);
+    setDimLine(A, Z, s2.clone().normalize().multiplyScalar(off*0.22));
+    label(sh.h, A.clone().add(Z).multiplyScalar(0.5));
+  } else {
+    // diameter across the end he has hold of - the number a machinist wants
+    const r = h.end ? sh.r1 : sh.r0;
+    const c = sh.p.clone().add(av.clone().multiplyScalar((h.end?1:-1) * sh.h/2));
+    const across = side.clone().multiplyScalar(r);
+    setDimLine(c.clone().sub(across), c.clone().add(across),
+               av.clone().multiplyScalar(Math.max(2, r*0.14)));
+    label(r * 2, c);
+  }
+}
+function hideDim() { dimLines.visible = false; dimEl.classList.remove('on'); }
+
+// ══ DRAGGING ═════════════════════════════════════════════════════════════
+// ⭐ THE HANDLE FOLLOWS THE CURSOR, not a scaled mouse delta. Build a plane
+//    containing the travel axis that faces the camera as squarely as it can,
+//    and read where the cursor lands on it. That is why it feels like pushing
+//    the thing rather than driving a slider.
+let drag = null, turning = null;
+const dragPlane = new THREE.Plane();
+const scratch = new THREE.Vector3();
+
+function travelAxis(h) {
+  if (h.sh.kind === 'box') return axisVec(h.axis);
+  if (h.type === 'length') return axisVec(h.sh.axis);
+  // radius: travel is straight out from the centreline, through the hit point
+  const av = axisVec(h.sh.axis);
+  const v = h.point.clone().sub(h.sh.p);
+  v.sub(av.clone().multiplyScalar(v.dot(av)));
+  return v.lengthSq() < 1e-6 ? new THREE.Vector3(1,0,0) : v.normalize();
+}
+
+function beginDrag(h) {
+  const a = travelAxis(h);
+  const toCam = camera.position.clone().sub(h.point).normalize();
+  const n = toCam.sub(a.clone().multiplyScalar(toCam.dot(a)));
+  if (n.lengthSq() < 1e-6) n.set(0,1,0);
+  dragPlane.setFromNormalAndCoplanarPoint(n.normalize(), h.point);
+  drag = { ...h, a,
+           start: h.point.clone(),
+           was: h.sh.kind === 'box' ? { s:h.sh.s.clone(), p:h.sh.p.clone() }
+                                    : { h:h.sh.h, r0:h.sh.r0, r1:h.sh.r1,
+                                        p:h.sh.p.clone() } };
 }
 
 function moveDrag(e) {
   toNdc(e);
   ray.setFromCamera(ptr, camera);
   if (!ray.ray.intersectPlane(dragPlane, scratch)) return;
-  const delta = scratch[drag.axis] - drag.start;
-  if (drag.sign > 0) {
-    B.max[drag.axis] = Math.max(B.min[drag.axis] + FLOOR, drag.was + delta);
+  const d = scratch.clone().sub(drag.start).dot(drag.a);
+  const sh = drag.sh, w = drag.was;
+
+  if (sh.kind === 'box') {
+    const ax = drag.axis;
+    const grow = drag.sign * d;                       // outward is positive
+    sh.s[ax] = Math.max(FLOOR, w.s[ax] + grow);
+    // ⭐ the opposite wall stays put - you are moving ONE face, not scaling
+    sh.p[ax] = w.p[ax] + drag.sign * (sh.s[ax] - w.s[ax]) / 2;
+  } else if (drag.type === 'length') {
+    const grow = drag.sign * d;
+    sh.h = Math.max(FLOOR, w.h + grow);
+    sh.p.copy(w.p).add(axisVec(sh.axis).multiplyScalar(drag.sign * (sh.h - w.h) / 2));
   } else {
-    B.min[drag.axis] = Math.min(B.max[drag.axis] - FLOOR, drag.was + delta);
+    // ⭐⭐ DEFORM. Only the end you have hold of moves, so a cylinder becomes a
+    //    cone by squeezing one end - his own finding, and the cheapest verb on
+    //    the list because a cone is not a new kind of thing.
+    const k = drag.end ? 'r1' : 'r0';
+    sh[k] = Math.max(0.2, w[k] + d);
   }
-  rebuild();
+  rebuild(sh);
   showGhost(drag);
-  showDim(drag.axis, ptr);
+  showDim(drag);
 }
 
 const cv = renderer.domElement;
 
-// ⭐ One path for mouse and finger. A dblclick handler would leave touch out,
+// ⭐ One path for mouse and finger - a dblclick handler would leave touch out,
 //    and touch is where he actually works.
-let lastTap = 0, lastTapXY = [0, 0];
+let lastTap = 0, lastXY = [0,0];
+function lookHere(e) {
+  const h = handleUnder(e);
+  if (h) {
+    pivotWant.copy(h.point);
+    spot.position.copy(h.point);
+    spot.scale.setScalar(Math.max(0.8, radius() * 0.018));
+    spot.visible = true;
+  } else {
+    bounds().getCenter(pivotWant);
+    spot.visible = false;
+  }
+}
+
 cv.addEventListener('pointerdown', (e) => {
   const now = performance.now();
-  const near = Math.hypot(e.clientX - lastTapXY[0], e.clientY - lastTapXY[1]) < 24;
+  const near = Math.hypot(e.clientX-lastXY[0], e.clientY-lastXY[1]) < 24;
   if (now - lastTap < 320 && near) {
     lastTap = 0;
     lookHere(e);
-    return;                       // ⛔ a look is not a grab - do not also drag
+    return;                       // ⛔ a look is not a grab
   }
-  lastTap = now; lastTapXY = [e.clientX, e.clientY];
+  lastTap = now; lastXY = [e.clientX, e.clientY];
 
   cv.setPointerCapture(e.pointerId);
-  const f = faceUnder(e);
-  if (f) { beginDrag(f); showGhost(f); showDim(f.axis, ptr); }  // ON  -> push/pull
-  else   { turning = { x:e.clientX, y:e.clientY }; }  // OFF it   -> turn
+  const h = handleUnder(e);
+  if (h) { beginDrag(h); showGhost(h); showDim(h); }
+  else   { turning = { x:e.clientX, y:e.clientY }; }
 });
 
 cv.addEventListener('pointermove', (e) => {
-  if (drag)         { moveDrag(e); return; }
+  if (drag) { moveDrag(e); return; }
   if (turning) {
     orbit.yaw   -= (e.clientX - turning.x) * 0.008;
     orbit.pitch += (e.clientY - turning.y) * 0.008;
@@ -468,47 +498,44 @@ cv.addEventListener('pointermove', (e) => {
     turning.x = e.clientX; turning.y = e.clientY;
     return;
   }
-  showGhost(faceUnder(e));                       // hover: show what he'd grab
+  showGhost(handleUnder(e));
 });
 
 function release(e) {
   try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
   drag = null; turning = null;
-  hideDim();          // ⭐ it exists only while he is pulling
+  hideDim();                      // ⭐ the ruler exists only while he is pulling
 }
 cv.addEventListener('pointerup', release);
 cv.addEventListener('pointercancel', release);
 
 cv.addEventListener('wheel', (e) => {
   e.preventDefault();
-  orbit.dist = Math.max(40, Math.min(2400, orbit.dist * (1 + Math.sign(e.deltaY) * 0.1)));
-  framing = orbit.dist / framingRadius();   // he just told us what size he wants
+  orbit.dist = Math.max(40, Math.min(3000, orbit.dist * (1 + Math.sign(e.deltaY)*0.1)));
+  framing = orbit.dist / framingRadius();      // he just told us what size he wants
 }, { passive:false });
 
-// Two fingers on glass do what the wheel does. Same rule: pinching re-teaches
-// the framing rather than fighting it.
 let pinch = null;
 cv.addEventListener('touchstart', (e) => {
   if (e.touches.length === 2) {
     const dx = e.touches[0].clientX - e.touches[1].clientX;
     const dy = e.touches[0].clientY - e.touches[1].clientY;
-    pinch = { d: Math.hypot(dx, dy), dist: orbit.dist };
+    pinch = { d: Math.hypot(dx,dy), dist: orbit.dist };
   }
 }, { passive:true });
 cv.addEventListener('touchmove', (e) => {
   if (pinch && e.touches.length === 2) {
     const dx = e.touches[0].clientX - e.touches[1].clientX;
     const dy = e.touches[0].clientY - e.touches[1].clientY;
-    const d = Math.hypot(dx, dy);
+    const d = Math.hypot(dx,dy);
     if (d > 4) {
-      orbit.dist = Math.max(40, Math.min(2400, pinch.dist * (pinch.d / d)));
+      orbit.dist = Math.max(40, Math.min(3000, pinch.dist * (pinch.d / d)));
       framing = orbit.dist / framingRadius();
     }
   }
 }, { passive:true });
 cv.addEventListener('touchend', () => { pinch = null; }, { passive:true });
 
-// ── run ──────────────────────────────────────────────────────────────────
 (function frame() {
   requestAnimationFrame(frame);
   holdFraming();
