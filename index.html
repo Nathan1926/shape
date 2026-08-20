@@ -205,12 +205,16 @@ function frustum(sh) {
     idx.push(bot+i, top+i, top+j,  bot+i, top+j, bot+j);
   }
   // caps: a centre vertex and a fan, so the normals come out flat
+  // WINDING DECIDES WHICH WAY A FACE LOOKS, and both caps were backwards on
+  //    the first try - Joe saw straight down into the cylinder. Checked by
+  //    hand rather than guessed: for the TOP fan, (centre, r_j, r_i) gives a
+  //    cross product pointing +Y, which is out. The bottom is the mirror.
   const cB = pos.length / 3; pos.push(0, -hy, 0);
   const rB = ring(a0, b0, -hy);
-  for (let i = 0; i < SEG; i++) idx.push(cB, rB + ((i+1) % SEG), rB + i);
+  for (let i = 0; i < SEG; i++) idx.push(cB, rB + i, rB + ((i+1) % SEG));
   const cT = pos.length / 3; pos.push(0,  hy, 0);
   const rT = ring(a1, b1,  hy);
-  for (let i = 0; i < SEG; i++) idx.push(cT, rT + i, rT + ((i+1) % SEG));
+  for (let i = 0; i < SEG; i++) idx.push(cT, rT + ((i+1) % SEG), rT + i);
 
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
