@@ -375,13 +375,21 @@ const hook = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12),
 hook.renderOrder = 995; hook.visible = false; scene.add(hook);
 let hookOwner = null;
 
-function shapeTop(sh) {
-  const up = new THREE.Vector3(0, 1, 0);
-  const half = sh.kind === 'box'
-    ? sh.s.y / 2
-    : (sh.axis === 'y' ? sh.h / 2 : Math.max(sh.a0, sh.b0, sh.a1, sh.b1));
-  return sh.p.clone().add(up.multiplyScalar(half + Math.max(4, radius() * 0.05)));
-}
+// ⛔⛔ IT USED TO SIT ABOVE THE SHAPE AND THAT WAS MY ERROR, reasoned rather
+//    than measured. I put it up there because a ball floating inside a solid
+//    "reads as a bug" and a hook over the top "reads as pick this up."
+// ⭐⭐ HIS HANDS SAID OTHERWISE, 2026-08-20: *"if we can move that blue dot down
+//    into the body of the part, somewhere away from the handles... When I have
+//    a tall handle, I have to do it by the way from up top, and it's hard to
+//    see what I'm doing."*
+// ⭐ THE CENTRE IS THE ONE PLACE THAT IS ALWAYS AWAY FROM THE HANDLES. Every
+//    grab this tool has lives on a SURFACE - faces, rims, the waist ring. The
+//    middle of the solid is the only spot nothing else wants, and on a tall
+//    part it is half the reach of the top.
+// ⚠️ THE COST, STATED: it now sits where he might also push a face from
+//    head-on. It is small and he can see it, so he can aim past it - but if it
+//    starts stealing grabs, offset it a third of the way down instead.
+function shapeCentre(sh) { return sh.p.clone(); }
 
 function showHook(sh) {
   // ⭐⭐ HE SEES WHAT HE IS ABOUT TO PICK UP, BEFORE HE PICKS IT UP. A hook that
@@ -393,7 +401,7 @@ function showHook(sh) {
   crewOf(sh).forEach(o => {
     if (o !== sh && o.mesh) o.mesh.material.emissive.setHex(0x3a2610);
   });
-  hook.position.copy(shapeTop(sh));
+  hook.position.copy(shapeCentre(sh));
   hook.scale.setScalar(Math.max(1.8, radius() * 0.026));
   hook.visible = true;
 }
@@ -794,6 +802,10 @@ function moveDrag(e) {
   d = Math.max(-drag.cap, Math.min(drag.cap, d));
 
   const sh = drag.sh, w = drag.was;
+  // ⭐ whatever this drag does to the numbers, the crew is put back on its
+  //    fraction afterwards. One call, at the end, covers face pushes, deform,
+  //    the rim beads and the waist ring alike.
+  queueMicrotask(() => { if (drag && drag.sh === sh) holdWelds(sh); });
 
   if (sh.kind === 'box') {
     const ax = drag.axis;
@@ -1114,6 +1126,80 @@ function refreshWelds() {
 }
 
 // ⭐ ONE DROP, AND WHICH WAY IT GOES IS WHAT HE CAN ALREADY SEE.
+// ⭐⭐ HIS SECOND FINDING, AND IT IS THE ONE THAT MAKES WELD MEAN SOMETHING:
+//    *"even with the weld, let's say I go pull one side of the hammer. The
+//    handle doesn't stay centered even after the weld."*
+//
+// ⛔ MY WELD ONLY HELD WHILE THINGS TRAVELLED. Change the head's SIZE and the
+//    handle sat where it was, which is not a weld - that is a tow rope.
+//
+// ⭐⭐ AND THE FIX IS NOT "MOVE IT BY THE SAME DELTA" - I tried that on paper
+//    and it fails his other case. Grow the head to the right, its centre moves
+//    right by half, so a centre-delta keeps the handle centred. GOOD. But pull
+//    the handle LONGER downward and its centre also moves down by half, so a
+//    centre-delta drags the head down with it. WRONG - the top of the handle
+//    never moved, so the head should not have.
+//
+// ⭐ WHAT ACTUALLY HOLDS IS THE FRACTION. Record where the partner sits inside
+//    my box as a 0..1 position on each axis, at the moment of the weld. Then
+//    whatever happens to my size, put it back at the same fraction.
+//        handle at 0.5 of the head's width   -> still centred after it grows
+//        head at 1.0 of the handle's length  -> still at the top after it grows
+//    ⛔ BOTH of his cases, from one rule, and neither needed a special case.
+// ⭐⭐ AND HIS OWN WORD FOR IT IS THE ONE THAT FIXES THE LAST GAP, 2026-08-20:
+//    *"SOLIDWORKS would treat a midpoint constraint or a symmetrical constraint
+//    no matter what I change to the hammer. The handle then would always remain
+//    centered, and I would have to un-weld it to change that constraint."*
+// ⛔ A RAW FRACTION CANNOT SAY "CENTRED". Weld the handle at 0.483 and it stays
+//    at 0.483 forever - near enough to look right, never actually a midpoint,
+//    and it drifts visibly the moment the head gets wide.
+// ⭐ SO THE FRACTION SNAPS WHEN IT IS TAKEN: near the middle becomes exactly
+//    the middle, near an end becomes exactly flush. THE WELD IS ROUNDED ONCE,
+//    AT THE MOMENT HE MAKES IT, and after that it is exact forever. That is
+//    the same instinct as the snap he asked for - "snap to symmetrical" - only
+//    spent on the constraint instead of on the placement.
+function fracOf(host, guest) {
+  const h = ext(host);
+  const f = new THREE.Vector3();
+  AX.forEach(x => {
+    const span = h.max[x] - h.min[x];
+    let v = span > 1e-6 ? (guest.p[x] - h.min[x]) / span : 0.5;
+    if (Math.abs(v - 0.5) < 0.06) v = 0.5;        // midpoint
+    else if (v < 0.06) v = 0;                     // flush with the low side
+    else if (v > 0.94) v = 1;                     // flush with the high side
+    f[x] = v;
+  });
+  return f;
+}
+
+function placeByFrac(host, guest, f) {
+  const h = ext(host);
+  AX.forEach(x => { guest.p[x] = h.min[x] + f[x] * (h.max[x] - h.min[x]); });
+  guest.mesh.position.copy(guest.p);
+}
+
+// ⭐ WALK OUTWARD FROM WHAT HE CHANGED. The head moves the handle; if something
+//    is welded to the handle it moves too, and it is the same loop. ⛔ Each
+//    shape is placed ONCE - a second visit would fight the first.
+function holdWelds(changed) {
+  const seed = SHAPES.indexOf(changed);
+  if (seed < 0) return;
+  const done = new Set([seed]);
+  const queue = [seed];
+  while (queue.length) {
+    const a = queue.shift();
+    WELDS.forEach(w => {
+      const o = w[0] === a ? w[1] : (w[1] === a ? w[0] : -1);
+      if (o < 0 || done.has(o)) return;
+      const host = SHAPES[a], guest = SHAPES[o];
+      if (host && guest && w.f) placeByFrac(host, guest, w.f[w[0] === a ? 1 : 0]);
+      done.add(o);
+      queue.push(o);
+    });
+  }
+  refreshWelds();
+}
+
 function weldDrop(sh) {
   const me = SHAPES.indexOf(sh);
   if (me < 0) return 'nothing there';
@@ -1127,7 +1213,11 @@ function weldDrop(sh) {
   let n = 0;
   SHAPES.forEach((o, j) => {
     if (o === sh || !touching(sh, o)) return;
-    WELDS.push([me, j]); n++;
+    // ⭐ BOTH DIRECTIONS, because either one of them can be the one he grabs.
+    //    f[0] is where SHAPES[i] sits inside SHAPES[j]; f[1] the reverse.
+    const pair = [me, j];
+    pair.f = [fracOf(o, sh), fracOf(sh, o)];
+    WELDS.push(pair); n++;
   });
   return n ? ('welded to ' + n) : 'not touching anything';
 }
@@ -1152,7 +1242,11 @@ function snapshot() {
       ? { kind:'box', p:sh.p.clone(), s:sh.s.clone() }
       : { kind:'cyl', p:sh.p.clone(), axis:sh.axis, h:sh.h,
           a0:sh.a0, b0:sh.b0, a1:sh.a1, b1:sh.b1 }),
-    welds: WELDS.map(w => w.slice()),
+    welds: WELDS.map(w => {
+      const c = w.slice();
+      if (w.f) c.f = w.f.map(v => v.clone());
+      return c;
+    }),
   });
   if (past.length > PAST_MAX) past.shift();
 }
@@ -1166,7 +1260,11 @@ function undo() {
     gone.mesh.geometry.dispose();
   }
   WELDS.length = 0;
-  step.welds.forEach(w => WELDS.push(w.slice()));
+  step.welds.forEach(w => {
+    const c = w.slice();
+    if (w.f) c.f = w.f.map(v => v.clone());   // ⛔ the fraction IS the weld
+    WELDS.push(c);
+  });
   was.forEach((w, i) => {
     const sh = SHAPES[i];
     sh.p.copy(w.p);
