@@ -723,6 +723,14 @@ function moveDrag(e) {
 
   if (drag.type === 'move') {
     drag.sh.p.copy(scratch).sub(drag.grab);
+
+    // ⭐ Propose from where his hand actually is, then move the shape to the
+    //    proposal. Shove past the tolerance and there is no proposal any more -
+    //    which is how he overrules it without holding anything down.
+    const prop = proposeSnap(drag.sh);
+    if (prop) drag.sh.p.add(prop.move);
+    showSnap(drag.sh, prop);
+
     drag.sh.mesh.position.copy(drag.sh.p);     // ⭐ no rebuild - nothing changed
     showHook(drag.sh);                          //    shape, only where it is
     showHandles(drag.sh.kind === 'cyl' ? drag.sh : null);
@@ -830,6 +838,131 @@ document.querySelectorAll('#box button').forEach(btn => {
   });
 });
 
+// ══ SNAP ═════════════════════════════════════════════════════════════════
+// ⭐⭐ HIS SMARTMATES INSTINCT, AND IT BELONGS HERE MORE THAN IN SOLIDWORKS.
+//    Joe, 2026-08-20: *"when two planes get close together they kind of snap
+//    together... I could position the cylinder, and when I got close to the
+//    center axis or the symmetrical plane of each face, it would kind of light
+//    up so I knew to stop it there."*
+//
+// ⭐ ROUGH PLACEMENT IS ILLEGIBLE WITHOUT IT. Everything sits slightly
+//    floating and he cannot tell whether he meant it. A snap is what turns
+//    "nearly touching" into "touching".
+//
+// ⛔ IT PROPOSES, IT DOES NOT DECIDE. A snap that overrides him is the tool
+//    fighting him - the one thing he tests everything against. It shows the
+//    alignment it thinks he wants; carrying on past it lets go, and no key is
+//    held to escape it, because he cannot hold a key.
+//
+// ⭐⭐ THE HARD PART WAS NEVER THE MATHS. Every shape already knows where its
+//    own middle is, so "am I near that centreline" is a subtraction. The hard
+//    part is WHICH of the twenty possible alignments he meant - which is why
+//    showing it first is not a nicety, it is the answer.
+const snapLines = new THREE.LineSegments(new THREE.BufferGeometry(),
+  new THREE.LineBasicMaterial({ color:0x9ad1ff, transparent:true, opacity:0.9,
+                                depthTest:false }));
+snapLines.renderOrder = 994; snapLines.visible = false; scene.add(snapLines);
+
+const AX = ['x', 'y', 'z'];
+
+// ⭐ Axis-aligned extents. Everything in this tool is axis-aligned so far, and
+//    the day something is rotated this is the function that has to grow up.
+function ext(sh) {
+  if (sh.kind === 'box') {
+    const h = sh.s.clone().multiplyScalar(0.5);
+    return { min: sh.p.clone().sub(h), max: sh.p.clone().add(h) };
+  }
+  const av = axisVec(sh.axis);
+  const u = new THREE.Vector3(av.y, av.z, av.x);
+  const v = new THREE.Vector3().crossVectors(av, u);
+  const ra = Math.max(sh.a0, sh.a1), rb = Math.max(sh.b0, sh.b1);
+  const half = av.clone().multiplyScalar(sh.h / 2)
+    .add(new THREE.Vector3(Math.abs(u.x)*ra, Math.abs(u.y)*ra, Math.abs(u.z)*ra))
+    .add(new THREE.Vector3(Math.abs(v.x)*rb, Math.abs(v.y)*rb, Math.abs(v.z)*rb));
+  return { min: sh.p.clone().sub(half), max: sh.p.clone().add(half) };
+}
+
+function proposeSnap(sh) {
+  const me = ext(sh);
+  const tol = Math.max(4, radius() * 0.055);
+  let best = null;
+
+  SHAPES.forEach(other => {
+    if (other === sh) return;
+    const it = ext(other);
+
+    AX.forEach(A => {
+      // ⭐ FACE TO FACE: my low side against its high side, or the reverse.
+      [[me.min[A] - it.max[A], -1], [it.min[A] - me.max[A], 1]].forEach(([gap, sgn]) => {
+        if (Math.abs(gap) > tol) return;
+        // the other two axes must actually overlap, or this is two things
+        // passing in the night rather than a face meeting a face
+        const rest = AX.filter(x => x !== A);
+        const touching = rest.every(B =>
+          Math.min(me.max[B], it.max[B]) - Math.max(me.min[B], it.min[B]) > -tol);
+        if (!touching) return;
+
+        const move = new THREE.Vector3();
+        move[A] = -gap * sgn * -1;            // close the gap exactly
+        const marks = [{ type:'face', A, at: sgn > 0 ? it.min[A] : it.max[A], other }];
+
+        // ⭐ AND WHILE WE ARE HERE, CENTRE IT. A post landing on a base wants
+        //    the middle of the base, and that is the snap he described.
+        rest.forEach(B => {
+          const d = other.p[B] - sh.p[B];
+          if (Math.abs(d) < tol * 1.6) {
+            move[B] = d;
+            marks.push({ type:'centre', A:B, other });
+          }
+        });
+
+        const cost = move.length();
+        if (!best || cost < best.cost) best = { move, marks, cost };
+      });
+    });
+  });
+  return best;
+}
+
+function showSnap(sh, prop) {
+  if (!prop) { snapLines.visible = false; return; }
+  const me = ext(sh);
+  const pts = [];
+  prop.marks.forEach(m => {
+    const it = ext(m.other);
+    if (m.type === 'face') {
+      // the rectangle where the two faces actually meet
+      const rest = AX.filter(x => x !== m.A);
+      const lo = {}, hi = {};
+      rest.forEach(B => {
+        lo[B] = Math.max(me.min[B] + prop.move[B], it.min[B]);
+        hi[B] = Math.min(me.max[B] + prop.move[B], it.max[B]);
+      });
+      const [B, C] = rest;
+      const corner = (b, c) => {
+        const v = new THREE.Vector3();
+        v[m.A] = m.at; v[B] = b ? hi[B] : lo[B]; v[C] = c ? hi[C] : lo[C];
+        return v;
+      };
+      const p00 = corner(0,0), p10 = corner(1,0), p11 = corner(1,1), p01 = corner(0,1);
+      pts.push(p00,p10, p10,p11, p11,p01, p01,p00);
+    } else {
+      // a line straight through both middles, so the alignment is visible
+      const a = m.other.p.clone(), b = m.other.p.clone();
+      const span = Math.max(radius() * 0.5, 20);
+      a[m.A] -= span; b[m.A] += span;
+      pts.push(a, b);
+    }
+  });
+  if (!pts.length) { snapLines.visible = false; return; }
+  const arr = new Float32Array(pts.length * 3);
+  pts.forEach((v,i) => { arr[i*3]=v.x; arr[i*3+1]=v.y; arr[i*3+2]=v.z; });
+  snapLines.geometry.dispose();
+  snapLines.geometry = new THREE.BufferGeometry();
+  snapLines.geometry.setAttribute('position', new THREE.BufferAttribute(arr,3));
+  snapLines.visible = true;
+}
+
 // ══ UNDO ═════════════════════════════════════════════════════════════════
 // ⛔⛔ RUNG ZERO, AND HE PAID FOR IT BEFORE I BUILT IT. 2026-08-20: *"I totally
 //    blew the bottom circle out... as big as the base of the Egyptian pyramids,
@@ -931,7 +1064,8 @@ cv.addEventListener('pointermove', (e) => {
 function release(e) {
   try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
   drag = null; turning = null;
-  hideDim();                      // ⭐ the ruler exists only while he is pulling
+  hideDim();
+  snapLines.visible = false;   // ⭐ the proposal is gone once he has decided                      // ⭐ the ruler exists only while he is pulling
 }
 cv.addEventListener('pointerup', release);
 cv.addEventListener('pointercancel', release);
