@@ -430,10 +430,23 @@ function travelAxis(h) {
 function beginDrag(h) {
   const a = travelAxis(h);
   const toCam = camera.position.clone().sub(h.point).normalize();
-  const n = toCam.sub(a.clone().multiplyScalar(toCam.dot(a)));
-  if (n.lengthSq() < 1e-6) n.set(0,1,0);
+  const n = toCam.clone().sub(a.clone().multiplyScalar(toCam.dot(a)));
+  // ⛔⛔ THE PYRAMID BUG, 2026-08-20. When the direction he is pulling points
+  //    nearly straight at the camera, this plane goes edge-on and the maths
+  //    goes singular: a pixel of mouse becomes a mile of radius. He grabbed the
+  //    near side of a cylinder and its base went to Giza. SolidWorks does the
+  //    same thing for the same reason, which is why he recognised it.
+  // ⭐ THE OLD GUARD WAS 1e-6 - far too tight. It only caught EXACTLY head-on,
+  //    and the damage happens long before exactly.
+  const cond = Math.abs(toCam.dot(a));         // 1 = head-on, 0 = square on
+  if (n.lengthSq() < 1e-4) n.set(0,1,0);
   dragPlane.setFromNormalAndCoplanarPoint(n.normalize(), h.point);
-  drag = { ...h, a,
+  drag = { ...h, a, cond,
+           // ⭐ what "too big" means for THIS shape, so the guard scales with
+           //    the part instead of being a number I picked out of the air
+           cap: (h.sh.kind === 'box'
+                 ? Math.max(h.sh.s.x, h.sh.s.y, h.sh.s.z)
+                 : Math.max(h.sh.h, h.sh.r0, h.sh.r1)) * 4 + 60,
            start: h.point.clone(),
            was: h.sh.kind === 'box' ? { s:h.sh.s.clone(), p:h.sh.p.clone() }
                                     : { h:h.sh.h, r0:h.sh.r0, r1:h.sh.r1,
@@ -444,7 +457,18 @@ function moveDrag(e) {
   toNdc(e);
   ray.setFromCamera(ptr, camera);
   if (!ray.ray.intersectPlane(dragPlane, scratch)) return;
-  const d = scratch.clone().sub(drag.start).dot(drag.a);
+  let d = scratch.clone().sub(drag.start).dot(drag.a);
+
+  // ⚠️ TWO GUARDS, AND BOTH ARE HONEST ABOUT WHAT THEY GIVE UP.
+  // 1 · Ill-conditioned pull: soften it rather than refusing it. Refusing feels
+  //     broken; softening feels like the shape is stiff from that angle, which
+  //     is at least a thing a hand understands.
+  if (drag.cond > 0.86) d *= Math.max(0.06, (1 - drag.cond) / 0.14);
+  // 2 · Nothing may leap further than a few times its own size in one move.
+  //     ⭐ He can still get there - keep dragging - but he cannot arrive by
+  //     accident, and he can always see it happening.
+  d = Math.max(-drag.cap, Math.min(drag.cap, d));
+
   const sh = drag.sh, w = drag.was;
 
   if (sh.kind === 'box') {
@@ -468,6 +492,41 @@ function moveDrag(e) {
   showGhost(drag);
   showDim(drag);
 }
+
+// ══ UNDO ═════════════════════════════════════════════════════════════════
+// ⛔⛔ RUNG ZERO, AND HE PAID FOR IT BEFORE I BUILT IT. 2026-08-20: *"I totally
+//    blew the bottom circle out... as big as the base of the Egyptian pyramids,
+//    and I had to start over because I couldn't back out of it."*
+// ⭐ ONE PUSH PER DRAG, TAKEN BEFORE THE DRAG STARTS. A pull is one move no
+//    matter how many frames his hand was down; undoing a single frame would be
+//    worse than having no undo at all.
+const past = [];
+const PAST_MAX = 40;
+function snapshot() {
+  past.push(SHAPES.map(sh => sh.kind === 'box'
+    ? { kind:'box', p:sh.p.clone(), s:sh.s.clone() }
+    : { kind:'cyl', p:sh.p.clone(), axis:sh.axis, h:sh.h, r0:sh.r0, r1:sh.r1 }));
+  if (past.length > PAST_MAX) past.shift();
+}
+function undo() {
+  const was = past.pop();
+  if (!was) return;
+  was.forEach((w, i) => {
+    const sh = SHAPES[i];
+    sh.p.copy(w.p);
+    if (sh.kind === 'box') sh.s.copy(w.s);
+    else { sh.h = w.h; sh.r0 = w.r0; sh.r1 = w.r1; }
+    rebuild(sh);
+  });
+  ghost.visible = false;
+  hideDim();
+}
+addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    e.preventDefault();
+    undo();
+  }
+});
 
 const cv = renderer.domElement;
 
@@ -499,7 +558,7 @@ cv.addEventListener('pointerdown', (e) => {
 
   cv.setPointerCapture(e.pointerId);
   const h = handleUnder(e);
-  if (h) { beginDrag(h); showGhost(h); showDim(h); }
+  if (h) { snapshot(); beginDrag(h); showGhost(h); showDim(h); }
   else   { turning = { x:e.clientX, y:e.clientY }; }
 });
 
