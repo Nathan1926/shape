@@ -884,6 +884,20 @@ function groundOrFace(e) {
 document.querySelectorAll('#box button').forEach(btn => {
   btn.addEventListener('pointerdown', (e) => {
     e.preventDefault();
+    // ⭐⭐ MATE IS PICKED UP BY A CLICK, NOT A DRAG. His call, 2026-08-20: *"I'd
+    //    rather have it where I just click the mate, go over it, click one,
+    //    click two, and that's it, not have to drag the mate."*
+    // ⛔ AND IT DOES NOT BREAK THE NO-DRAG-TO-ARM RULE - it CLARIFIES it. A
+    //    shape is dropped in a PLACE, so the drag ends where it belongs. Mate
+    //    acts on two things somewhere else entirely; there is nowhere to drop
+    //    it. ⭐ Drag out what has a destination; click what has a target.
+    if (btn.dataset.tool === 'mate') {
+      if (mateHeld) { dropTool(); return; }     // click it again to put it down
+      dropTool();
+      mateHeld = true; mateBtn = btn;
+      btn.classList.add('held');
+      return;
+    }
     btn.setPointerCapture(e.pointerId);
     carrying = { kind:btn.dataset.kind, tool:btn.dataset.tool, btn };
     btn.classList.add('armed');
@@ -901,17 +915,6 @@ document.querySelectorAll('#box button').forEach(btn => {
     // ⭐ A TOOL IS DROPPED ON A THING; A SHAPE IS DROPPED IN A PLACE. Same
     //    gesture out of the same carousel, which is what makes the next tool
     //    (the knife) cost nothing to teach.
-    // ⭐ PICKING IT UP IS THE SAME GESTURE AS EVERY OTHER TOOL - drag out,
-    //    let go on the thing. The difference is it STAYS in his hand after.
-    if (tool === 'mate') {
-      const f = faceOf(handleUnder(e));
-      if (!f) return;                    // let go on nothing: never picked up
-      mateA = f; mateBtn = btn;
-      btn.classList.add('held');
-      markFace(f);
-      return;
-    }
-
     if (tool === 'weld') {
       const on = shapeAt(e);
       if (!on) return;                      // dropped on air - nothing happened
@@ -968,7 +971,28 @@ const mark = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
                                 side:THREE.DoubleSide, depthTest:false }));
 mark.renderOrder = 997; mark.visible = false; scene.add(mark);
 
-let mateA = null, mateBtn = null;
+let mateA = null, mateBtn = null, mateHeld = false;
+
+// ⭐⭐ THE COMPLAINT THAT MATTERED MOST, 2026-08-20: *"it doesn't really show
+//    anything happening. It doesn't actually drag, so I can't tell that I am
+//    actually doing the right thing."*
+// ⛔ A DRAG SHOWS YOU THE ANSWER WHILE YOU DECIDE. Two clicks show you nothing
+//    until it is already done - which means the only way to find out whether he
+//    aimed right is to do it and look. That is a tool asking him to guess.
+// ⭐⭐ SO THE PREVIEW IS THE FEATURE, NOT THE POLISH. Hover a face and the part
+//    is drawn where it WOULD land, in outline, before anything moves. The
+//    two-click gesture stops being blind and starts being a decision he can see.
+const preview = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
+  new THREE.LineBasicMaterial({ color:0x9ad1ff, transparent:true, opacity:0.95,
+                                depthTest:false }));
+preview.renderOrder = 999; preview.visible = false; scene.add(preview);
+
+// the candidate face under his cursor, fainter than the one he has committed to
+const mark2 = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshBasicMaterial({ color:0x9ad1ff, transparent:true, opacity:0.16,
+                                side:THREE.DoubleSide, depthTest:false }));
+mark2.renderOrder = 996; mark2.visible = false; scene.add(mark2);
 
 // ⭐ ONE SHAPE OF ANSWER FOR BOTH KINDS. A box face and a cylinder's flat end
 //    are the same thing to this verb: an axis and a side.
@@ -981,24 +1005,53 @@ function faceOf(h) {
   return null;                       // a barrel is not a face. Keep waiting.
 }
 
-function markFace(f) {
-  if (!f) { mark.visible = false; return; }
+function markFace(f, m) {
+  m = m || mark;
+  if (!f) { m.visible = false; return; }
   const e = ext(f.sh);
   const sz = new THREE.Vector3().subVectors(e.max, e.min);
   const c = new THREE.Vector3().addVectors(e.max, e.min).multiplyScalar(0.5);
   c[f.ax] = (f.sgn > 0 ? e.max[f.ax] : e.min[f.ax]) + 0.4 * f.sgn;
-  mark.geometry.dispose();
-  mark.rotation.set(0, 0, 0);
-  if (f.ax === 'x') { mark.geometry = new THREE.PlaneGeometry(sz.z, sz.y); mark.rotation.y = Math.PI/2; }
-  else if (f.ax === 'y') { mark.geometry = new THREE.PlaneGeometry(sz.x, sz.z); mark.rotation.x = Math.PI/2; }
-  else { mark.geometry = new THREE.PlaneGeometry(sz.x, sz.y); }
-  mark.position.copy(c);
-  mark.visible = true;
+  m.geometry.dispose();
+  m.rotation.set(0, 0, 0);
+  if (f.ax === 'x') { m.geometry = new THREE.PlaneGeometry(sz.z, sz.y); m.rotation.y = Math.PI/2; }
+  else if (f.ax === 'y') { m.geometry = new THREE.PlaneGeometry(sz.x, sz.z); m.rotation.x = Math.PI/2; }
+  else { m.geometry = new THREE.PlaneGeometry(sz.x, sz.y); }
+  m.position.copy(c);
+  m.visible = true;
+}
+
+// ⭐ the move is worked out once and used twice - to DRAW the preview and to
+//    DO the mate. ⛔ Two copies of this arithmetic would drift, and the day
+//    they drift the preview lies, which is worse than having no preview.
+function mateMove(a, b) {
+  const ax = b.ax, sgn = b.sgn;
+  const eb = ext(b.sh), ea = ext(a.sh);
+  const move = new THREE.Vector3();
+  move[ax] = (sgn > 0 ? eb.max[ax] - ea.min[ax] : eb.min[ax] - ea.max[ax]);
+  AX.forEach(x => { if (x !== ax) move[x] = b.sh.p[x] - a.sh.p[x]; });
+  return move;
+}
+
+function showPreview(b) {
+  if (!mateA || !b || b.sh === mateA.sh) {
+    preview.visible = false; mark2.visible = false; return;
+  }
+  markFace(b, mark2);
+  const move = mateMove(mateA, b);
+  const e = ext(mateA.sh);
+  const sz = new THREE.Vector3().subVectors(e.max, e.min);
+  preview.scale.set(Math.max(sz.x, 0.01), Math.max(sz.y, 0.01), Math.max(sz.z, 0.01));
+  preview.position.addVectors(e.min, e.max).multiplyScalar(0.5).add(move);
+  preview.visible = true;
 }
 
 function dropTool() {
   mateA = null;
+  mateHeld = false;
   mark.visible = false;
+  mark2.visible = false;
+  preview.visible = false;
   if (mateBtn) mateBtn.classList.remove('held');
   mateBtn = null;
 }
@@ -1007,13 +1060,7 @@ function dropTool() {
 //    the same order as saying it out loud, and the only order that does not
 //    need a rule to remember.
 function doMate(a, b) {
-  const ax = b.ax, sgn = b.sgn;
-  const eb = ext(b.sh), ea = ext(a.sh);
-  const move = new THREE.Vector3();
-  // seat A's near extreme exactly on B's face plane, on the OUTSIDE of it
-  move[ax] = (sgn > 0 ? eb.max[ax] - ea.min[ax] : eb.min[ax] - ea.max[ax]);
-  // and centre it on the other two, which is the "boom" half
-  AX.forEach(x => { if (x !== ax) move[x] = b.sh.p[x] - a.sh.p[x]; });
+  const move = mateMove(a, b);     // ⭐ the same line the preview drew
 
   // ⛔ THE WHOLE CREW TRAVELS. A rigid translation keeps every weld fraction
   //    intact, so a mated hammer arrives assembled rather than in pieces.
@@ -1458,20 +1505,27 @@ cv.addEventListener('pointerdown', (e) => {
     panning = { x:e.clientX, y:e.clientY };
     return;
   }
-  // ⛔ BEFORE THE TAP CLOCK AND BEFORE ANY DRAG. While the mate tool is in
-  //    his hand the next touch means one thing only, and a half-started drag
-  //    underneath it would be the tool fighting him.
-  if (mateA) {
+  // ⛔⛔ THE BUG HIS HANDS FOUND, 2026-08-20: *"the mate faces don't survive me
+  //    trying to rotate the view. As soon as I click the metal button or try to
+  //    pan or anything, the mate surface unselects."*
+  //    I had written "any other touch puts the tool down" and called it a cheap
+  //    escape. ⛔ IT IS NOT AN ESCAPE, IT IS A TRAP - the one thing he must do
+  //    between picking two faces is LOOK AROUND, and looking around threw the
+  //    work away. Mating two faces you cannot both see at once is the normal
+  //    case, not the edge case.
+  // ⭐ SO: while the tool is held, a press starts nothing and cancels nothing.
+  //    Orbit freely. Only a real CLICK on a face counts, and only the button or
+  //    Escape puts the tool down.
+  // ⭐ HIS OWN CORRECTION NAILED IT: *"the mate selected face survives pan, just
+  //    not rotate... I go to use the center button to rotate, the scroll wheel
+  //    to rotate. It doesn't rotate, and the selected face deselects."*
+  //    Pan lived because the right button is handled above this. Rotate died
+  //    because it fell into here. ⛔ THE MIDDLE BUTTON IS HIS ROTATE - same as
+  //    SolidWorks - so it must turn the view and never count as a pick.
+  if (mateHeld) {
     e.preventDefault();
-    const f = faceOf(handleUnder(e));
-    if (f && f.sh !== mateA.sh) {
-      snapshot();
-      doMate(mateA, f);
-    }
-    // ⭐ ANY OTHER TOUCH PUTS THE TOOL DOWN - empty space, the same shape, a
-    //    barrel. There is no wrong click, only a click that ends it, which is
-    //    the cheapest escape there is for a hand that cannot hold anything.
-    dropTool();
+    cv.setPointerCapture(e.pointerId);
+    turning = { x:e.clientX, y:e.clientY, from:[e.clientX, e.clientY], btn:e.button };
     return;
   }
 
@@ -1492,6 +1546,7 @@ cv.addEventListener('pointerdown', (e) => {
 
 cv.addEventListener('pointermove', (e) => {
   if (panning) { panBy(e); return; }
+  if (mateHeld && !turning) { showPreview(faceOf(handleUnder(e))); return; }
   if (drag) { moveDrag(e); return; }
   if (turning) {
     orbit.yaw   -= (e.clientX - turning.x) * 0.008;
@@ -1511,6 +1566,24 @@ cv.addEventListener('pointermove', (e) => {
 
 function release(e) {
   try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
+
+  // ⭐ A CLICK IS A PRESS THAT DID NOT TRAVEL. Judging it on release is what
+  //    lets him orbit by dragging from anywhere - including from ON a shape -
+  //    without ever picking a face he did not mean.
+  if (mateHeld && turning && turning.from) {
+    const still = Math.hypot(e.clientX - turning.from[0], e.clientY - turning.from[1]) < 6;
+    const wasLeft = turning.btn === 0;      // ⛔ only the left button picks
+    turning = null;
+    if (still && wasLeft) {
+      const f = faceOf(handleUnder(e));
+      if (f) {
+        if (!mateA) { mateA = f; markFace(f); }
+        else if (f.sh !== mateA.sh) { snapshot(); doMate(mateA, f); dropTool(); }
+      }
+    }
+    drag = null; panning = null;
+    return;
+  }
   drag = null; turning = null; panning = null;
   hideDim();
   snapLines.visible = false;   // ⭐ the proposal is gone once he has decided                      // ⭐ the ruler exists only while he is pulling
