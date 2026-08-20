@@ -297,12 +297,37 @@ function handlePlaces(sh) {
   return out;
 }
 
+// ⭐⭐ THE WAIST RING. Joe, 2026-08-20: *"can you put a ring in the center,
+//    midway between the ends, to pull the whole cylinder's diameter? Right now
+//    the only way to change the size is to do each end separately."*
+// ⭐ AND IT SCALES, IT DOES NOT ADD. If he has already drawn the thing up into
+//    a cone, fattening it must keep the taper - adding the same amount to both
+//    ends would quietly straighten it out, and he would have lost the shape he
+//    made without ever being told.
+const waist = new THREE.Mesh(new THREE.TorusGeometry(1, 0.045, 8, 64),
+  new THREE.MeshBasicMaterial({ color:0xffb37a, transparent:true, opacity:0.9,
+                                depthTest:false }));
+waist.renderOrder = 996; waist.visible = false; scene.add(waist);
+
+function meanR(sh) { return (sh.a0 + sh.b0 + sh.a1 + sh.b1) / 4; }
+
 let handleOwner = null;
 function showHandles(sh) {
   handles.forEach(m => m.visible = false);
   handleOwner = null;
+  waist.visible = false;
+  waist.visible = false;
   if (!sh || sh.kind !== 'cyl') return;
   handleOwner = sh;
+
+  // sits at the midpoint, across the axis, sized to the average of the ends
+  const r = meanR(sh);
+  waist.position.copy(sh.p);
+  waist.scale.set(r, r, Math.max(r * 0.06, 0.6));
+  waist.rotation.set(0, 0, 0);
+  if (sh.axis === 'y') waist.rotation.x = Math.PI / 2;
+  if (sh.axis === 'x') waist.rotation.y = Math.PI / 2;
+  waist.visible = true;
   const places = handlePlaces(sh);
   const size = Math.max(1.6, radius() * 0.022);
   let n = 0;
@@ -382,6 +407,11 @@ function handleUnder(e) {
   // ⭐ A HANDLE OUTRANKS THE SURFACE BEHIND IT. It is smaller and it is
   //    deliberate - if he aimed at the bead he meant the bead, and losing that
   //    to the wall behind it is the tool second-guessing him.
+  if (waist.visible) {
+    const wh = ray.intersectObject(waist, false)[0];
+    if (wh) return { sh:handleOwner, type:'whole', point:wh.point };
+  }
+
   const hh = ray.intersectObjects(handles.filter(m => m.visible), false)[0];
   if (hh) {
     const pl = hh.object.userData.place;
@@ -512,6 +542,15 @@ function showDim(h) {
   const av = axisVec(sh.axis);
   const side = (h.type === 'rad1') ? h.dirAxis.clone()
                                    : new THREE.Vector3(av.y, av.z, av.x);
+  if (h.type === 'whole') {
+    // across the waist itself - the number he is actually setting
+    const r = meanR(sh);
+    const across = side.clone().multiplyScalar(r);
+    setDimLine(sh.p.clone().sub(across), sh.p.clone().add(across),
+               av.clone().multiplyScalar(Math.max(2, r * 0.14)));
+    label(r * 2, sh.p.clone());
+    return;
+  }
   if (h.type === 'length') {
     const off = Math.max(6, Math.max(sh.a0, sh.b0, sh.a1, sh.b1) * 1.35);
     const s2 = side.clone().multiplyScalar(off);
@@ -543,6 +582,13 @@ const dragPlane = new THREE.Plane();
 const scratch = new THREE.Vector3();
 
 function travelAxis(h) {
+  if (h.type === 'whole') {
+    // straight out from the centreline, through wherever he took hold
+    const av = axisVec(h.sh.axis);
+    const v = h.point.clone().sub(h.sh.p);
+    v.sub(av.clone().multiplyScalar(v.dot(av)));
+    return v.lengthSq() < 1e-6 ? new THREE.Vector3(1,0,0) : v.normalize();
+  }
   if (h.type === 'rad1') return h.dirAxis.clone();
   if (h.sh.kind === 'box') return axisVec(h.axis);
   if (h.type === 'length') return axisVec(h.sh.axis);
@@ -608,6 +654,12 @@ function moveDrag(e) {
     const grow = drag.sign * d;
     sh.h = Math.max(FLOOR, w.h + grow);
     sh.p.copy(w.p).add(axisVec(sh.axis).multiplyScalar(drag.sign * (sh.h - w.h) / 2));
+  } else if (drag.type === 'whole') {
+    // ⭐ one factor, all four numbers - the proportions he made are preserved
+    const was = (w.a0 + w.b0 + w.a1 + w.b1) / 4;
+    const k = Math.max(0.02, (was + d) / Math.max(was, 0.001));
+    sh.a0 = Math.max(0.2, w.a0 * k); sh.b0 = Math.max(0.2, w.b0 * k);
+    sh.a1 = Math.max(0.2, w.a1 * k); sh.b1 = Math.max(0.2, w.b1 * k);
   } else if (drag.type === 'rad1') {
     // ⭐⭐ ONE DIRECTION ONLY. This is the ellipse, and nothing was held down to
     //    get it - he grabbed the bead that owns this radius.
