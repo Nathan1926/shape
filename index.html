@@ -1,0 +1,233 @@
+<title>Shape</title>
+
+<!--
+  ══ SHAPE ═════════════════════════════════════════════════════════════════
+  Joe's brief, 2026-08-20: "I want a brainstorming tool, not a CAD tool. No
+  dimensions, no precision, no text. ... The question is whether shaping things
+  directly feels right to me or feels stupid, and that is answerable in a day."
+
+  ⛔ WHAT THIS IS NOT: not modelling, not measuring, not a file format, not a
+     step in the toolchain. HIS TEST: "If it ever needs a dimension box, it has
+     drifted." So there is no number anywhere on this page, on purpose.
+
+  ⛔ THE LOOSENESS IS THE FEATURE, NOT A SHORTCUT. His words: push-pull "makes a
+     poor design tool precisely because it is loose. That looseness is what I
+     want. Same behaviour, different job. Do not tighten it."
+
+  ⭐ ONE RULE FOR THE MOUSE, BECAUSE HE CANNOT USE FINE MOTOR CONTROL:
+        drag ON the shape   -> push or pull that face
+        drag OFF the shape  -> turn the view
+     No modes, no modifier keys, no buttons. Nothing to hold down.
+
+  ⚠️ THE THING THAT IS FAKED, STATED UP FRONT BECAUSE HE ASKED FOR IT:
+     THERE IS NO SOLID UNDERNEATH. This is six numbers - the position of six
+     planes. Dragging a face edits one number. That is genuinely push-pull for
+     one box and it is a dead end for anything past it: a second shape, a cut,
+     or a fuse all need a real B-rep and this representation gets thrown away.
+     It answers his question honestly and it does not grow.
+
+  ⭐ Quest 3 later: three.js carries WebXR, so hands are a later rung on THIS
+     page rather than a separate program. Nothing here is built for VR now.
+-->
+
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#15171a; }
+  canvas { display:block; touch-action:none; }
+</style>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+// ── the whole model: six planes ──────────────────────────────────────────
+// ⛔ This is the fake. A real solid would be faces, edges and vertices with
+//    topology between them. This is min/max on three axes and nothing else.
+const B = { min: new THREE.Vector3(-30, -18, -22),
+            max: new THREE.Vector3( 30,  18,  22) };
+const FLOOR = 6;   // a face can never be pushed through its opposite number
+
+const scene    = new THREE.Scene();
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(42, 1, 1, 4000);
+
+// ⭐ A GROUND GRID IS NOT DECORATION. A solid floating in a void has no depth
+//    cue at all, and "does it fight me" cannot be answered if he cannot tell
+//    which way the thing is facing. Faint on purpose.
+const grid = new THREE.GridHelper(600, 30, 0x2a2f36, 0x1e2228);
+grid.position.y = -140;
+scene.add(grid);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const key = new THREE.DirectionalLight(0xfff4e6, 2.1);
+key.position.set(0.6, 1.0, 0.8);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x9fb6d0, 0.7);
+rim.position.set(-0.7, 0.3, -0.6);
+scene.add(rim);
+
+const mat = new THREE.MeshStandardMaterial({
+  color: 0x9aa3ad, roughness: 0.62, metalness: 0.08, flatShading: false });
+const solid = new THREE.Mesh(new THREE.BoxGeometry(1,1,1), mat);
+scene.add(solid);
+
+// the face the cursor is over, drawn as a translucent skin so he knows what
+// he is about to grab. ⭐ Feedback, not polish - without it the first drag is
+// a guess, and a tool you have to guess at is a tool that fights you.
+const ghost = new THREE.Mesh(
+  new THREE.PlaneGeometry(1,1),
+  new THREE.MeshBasicMaterial({ color:0xffb37a, transparent:true, opacity:0.22,
+                                depthTest:true, side:THREE.DoubleSide }));
+ghost.visible = false;
+scene.add(ghost);
+
+function rebuild() {
+  const s = new THREE.Vector3().subVectors(B.max, B.min);
+  solid.geometry.dispose();
+  solid.geometry = new THREE.BoxGeometry(s.x, s.y, s.z);
+  solid.position.copy(B.min).add(B.max).multiplyScalar(0.5);
+}
+rebuild();
+
+// ── the view ─────────────────────────────────────────────────────────────
+const orbit = { yaw: 0.72, pitch: 0.46, dist: 190 };
+function placeCamera() {
+  const cp = Math.cos(orbit.pitch);
+  camera.position.set(Math.sin(orbit.yaw) * cp * orbit.dist,
+                      Math.sin(orbit.pitch)     * orbit.dist,
+                      Math.cos(orbit.yaw) * cp * orbit.dist);
+  camera.lookAt(0, 0, 0);
+}
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+// ── picking ──────────────────────────────────────────────────────────────
+const ray = new THREE.Raycaster();
+const ptr = new THREE.Vector2();
+function toNdc(e) {
+  ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+}
+
+// The box is axis-aligned and never rotated, so the hit triangle's own normal
+// IS the axis. ⭐ That is the one thing the fake representation buys us.
+function faceUnder(e) {
+  toNdc(e);
+  ray.setFromCamera(ptr, camera);
+  const hit = ray.intersectObject(solid, false)[0];
+  if (!hit) return null;
+  const n = hit.face.normal;
+  const axis = Math.abs(n.x) > 0.5 ? 'x' : Math.abs(n.y) > 0.5 ? 'y' : 'z';
+  return { axis, sign: n[axis] > 0 ? 1 : -1, point: hit.point.clone() };
+}
+
+function showGhost(f) {
+  if (!f) { ghost.visible = false; return; }
+  const s = new THREE.Vector3().subVectors(B.max, B.min);
+  const c = new THREE.Vector3().copy(B.min).add(B.max).multiplyScalar(0.5);
+  const lift = 0.35;                       // sit just proud of the real face
+  ghost.rotation.set(0,0,0);
+  if (f.axis === 'x') {
+    ghost.geometry.dispose(); ghost.geometry = new THREE.PlaneGeometry(s.z, s.y);
+    ghost.rotation.y = Math.PI/2;
+    ghost.position.set((f.sign>0?B.max.x:B.min.x) + f.sign*lift, c.y, c.z);
+  } else if (f.axis === 'y') {
+    ghost.geometry.dispose(); ghost.geometry = new THREE.PlaneGeometry(s.x, s.z);
+    ghost.rotation.x = Math.PI/2;
+    ghost.position.set(c.x, (f.sign>0?B.max.y:B.min.y) + f.sign*lift, c.z);
+  } else {
+    ghost.geometry.dispose(); ghost.geometry = new THREE.PlaneGeometry(s.x, s.y);
+    ghost.position.set(c.x, c.y, (f.sign>0?B.max.z:B.min.z) + f.sign*lift);
+  }
+  ghost.visible = true;
+}
+
+// ── dragging a face ──────────────────────────────────────────────────────
+// ⭐ THE FACE FOLLOWS THE CURSOR, it does not follow a scaled mouse delta.
+//    Build a plane that contains the face's travel axis and faces the camera
+//    as squarely as it can, then just read where the cursor lands on it. That
+//    is why it feels like pushing the face rather than driving a slider.
+let drag = null, turning = null;
+const dragPlane = new THREE.Plane();
+const scratch   = new THREE.Vector3();
+
+function axisVec(a) {
+  return a === 'x' ? new THREE.Vector3(1,0,0)
+       : a === 'y' ? new THREE.Vector3(0,1,0)
+                   : new THREE.Vector3(0,0,1);
+}
+
+function beginDrag(f) {
+  const a = axisVec(f.axis);
+  const toCam = new THREE.Vector3().subVectors(camera.position, f.point).normalize();
+  // plane normal = the part of the camera direction perpendicular to the axis
+  const n = toCam.clone().sub(a.clone().multiplyScalar(toCam.dot(a)));
+  if (n.lengthSq() < 1e-6) n.set(0,1,0);      // dead-on: any perpendicular does
+  n.normalize();
+  dragPlane.setFromNormalAndCoplanarPoint(n, f.point);
+  drag = { ...f, axis3: a,
+           start: f.point[f.axis],
+           was: f.sign > 0 ? B.max[f.axis] : B.min[f.axis] };
+}
+
+function moveDrag(e) {
+  toNdc(e);
+  ray.setFromCamera(ptr, camera);
+  if (!ray.ray.intersectPlane(dragPlane, scratch)) return;
+  const delta = scratch[drag.axis] - drag.start;
+  if (drag.sign > 0) {
+    B.max[drag.axis] = Math.max(B.min[drag.axis] + FLOOR, drag.was + delta);
+  } else {
+    B.min[drag.axis] = Math.min(B.max[drag.axis] - FLOOR, drag.was + delta);
+  }
+  rebuild();
+  showGhost(drag);
+}
+
+const cv = renderer.domElement;
+
+cv.addEventListener('pointerdown', (e) => {
+  cv.setPointerCapture(e.pointerId);
+  const f = faceUnder(e);
+  if (f) { beginDrag(f); showGhost(f); }        // ON the shape  -> push/pull
+  else   { turning = { x:e.clientX, y:e.clientY }; }  // OFF it   -> turn
+});
+
+cv.addEventListener('pointermove', (e) => {
+  if (drag)         { moveDrag(e); return; }
+  if (turning) {
+    orbit.yaw   -= (e.clientX - turning.x) * 0.008;
+    orbit.pitch += (e.clientY - turning.y) * 0.008;
+    orbit.pitch  = Math.max(-1.45, Math.min(1.45, orbit.pitch));
+    turning.x = e.clientX; turning.y = e.clientY;
+    return;
+  }
+  showGhost(faceUnder(e));                       // hover: show what he'd grab
+});
+
+function release(e) {
+  try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
+  drag = null; turning = null;
+}
+cv.addEventListener('pointerup', release);
+cv.addEventListener('pointercancel', release);
+
+cv.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  orbit.dist = Math.max(60, Math.min(900, orbit.dist * (1 + Math.sign(e.deltaY) * 0.1)));
+}, { passive:false });
+
+// ── run ──────────────────────────────────────────────────────────────────
+(function frame() {
+  requestAnimationFrame(frame);
+  placeCamera();
+  renderer.render(scene, camera);
+})();
+</script>
