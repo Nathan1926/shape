@@ -526,8 +526,23 @@ function handleUnder(e) {
   const hh = ray.intersectObjects(handles.filter(m => m.visible), false)[0];
   if (hh) {
     const pl = hh.object.userData.place;
+    // ⛔⛔ HALF THE BEADS RAN BACKWARDS AND HIS HANDS FOUND IT, 2026-08-20:
+    //    *"the handle drag on the ellipse is backwards... in fairness, if I
+    //    drag from the bottom, it doesn't matter."*
+    // ⭐⭐ THAT SECOND SENTENCE IS THE WHOLE DIAGNOSIS. A pair of beads sits on
+    //    OPPOSITE sides of the centreline and both were handed the SAME travel
+    //    direction - so one pulled outward and its twin pulled inward, and the
+    //    only reason it was not obvious is that half of them were right.
+    // ⭐ A BEAD MUST TRAVEL THE WAY IT ITSELF POINTS: outward from the
+    //    centreline, through the bead. Read that off the bead's own position
+    //    rather than off the radius it belongs to.
+    const av = axisVec(handleOwner.axis);
+    const r = hh.object.position.clone().sub(handleOwner.p);
+    r.sub(av.clone().multiplyScalar(r.dot(av)));        // its radial part
+    const dir = pl.axis.clone();
+    if (r.dot(dir) < 0) dir.negate();
     return { sh:handleOwner, type:'rad1', k:pl.k, end:pl.end,
-             dirAxis:pl.axis.clone(), point:hh.point };
+             dirAxis:dir, point:hh.point };
   }
 
   const hit = ray.intersectObjects(SHAPES.map(s => s.mesh), false)[0];
@@ -813,11 +828,6 @@ function moveDrag(e) {
   d = Math.max(-drag.cap, Math.min(drag.cap, d));
 
   const sh = drag.sh, w = drag.was;
-  // ⭐ whatever this drag does to the numbers, the crew is put back on its
-  //    fraction afterwards. One call, at the end, covers face pushes, deform,
-  //    the rim beads and the waist ring alike.
-  queueMicrotask(() => { if (drag && drag.sh === sh) holdWelds(sh); });
-
   if (sh.kind === 'box') {
     const ax = drag.axis;
     const grow = drag.sign * d;                       // outward is positive
@@ -847,6 +857,11 @@ function moveDrag(e) {
     sh[kb] = Math.max(0.2, w[kb] + d);
   }
   rebuild(sh);
+  // ⭐ RIGHT HERE, WHERE THE NUMBERS HAVE JUST CHANGED AND THE MESH IS FRESH.
+  //    It used to run in a microtask, which was a way of saying "later" without
+  //    knowing when later was. Face pushes, deform, the beads and the waist all
+  //    land on this line, so one call covers every way a shape can change.
+  holdWelds(sh);
   showGhost(drag);
   showDim(drag);
   showHandles(sh.kind === 'cyl' ? sh : null);
@@ -1311,25 +1326,62 @@ function refreshWelds() {
 //    AT THE MOMENT HE MAKES IT, and after that it is exact forever. That is
 //    the same instinct as the snap he asked for - "snap to symmetrical" - only
 //    spent on the constraint instead of on the placement.
-function fracOf(host, guest) {
-  const h = ext(host);
-  const f = new THREE.Vector3();
+// ⛔⛔ MY FIRST VERSION STORED ONE FRACTION PER AXIS AND IT WAS WRONG IN A WAY
+//    HIS HANDS FOUND IN A MINUTE: *"when I drag the hammer head taller, the
+//    handle basically goes down into the material. It doesn't stay mated to
+//    the surface."*
+// ⭐⭐ HERE IS WHY, AND IT IS WORTH KEEPING. A fraction says where the guest's
+//    CENTRE sits inside the host's box. But a welded part is not inside its
+//    partner - IT IS ALONGSIDE IT. The handle's centre is BELOW the head, so
+//    its fraction came out NEGATIVE, my rounding clamped it to 0, and 0 means
+//    "centre on the host's bottom face" - which is exactly halfway buried.
+//    ⛔ THE ROUNDING I ADDED TO MAKE MIDPOINTS EXACT IS WHAT DROVE IT INTO THE
+//    STEEL. A tidy-up on a model that was already wrong.
+//
+// ⭐⭐ A WELD IS TWO DIFFERENT THINGS AT ONCE AND THEY NEED DIFFERENT RULES:
+//      ACROSS the joint   - stay FLUSH. An offset, held against the face,
+//                           however either part grows. This is the mate.
+//      ALONG the joint    - stay at the same FRACTION. Middle stays middle.
+//                           This is the midpoint constraint he named.
+//    ⛔ One rule for both was the error. The contact axis is worked out once,
+//    when he welds, from whichever pair of faces is actually touching.
+function relOf(host, guest) {
+  const h = ext(host), g = ext(guest);
+  let ax = 'y', sgn = 1, best = Infinity;
   AX.forEach(x => {
+    const above = Math.abs(g.min[x] - h.max[x]);     // guest on the + side
+    const below = Math.abs(h.min[x] - g.max[x]);     // guest on the - side
+    if (above < best) { best = above; ax = x; sgn = 1; }
+    if (below < best) { best = below; ax = x; sgn = -1; }
+  });
+  const f = {};
+  AX.forEach(x => {
+    if (x === ax) return;
     const span = h.max[x] - h.min[x];
     let v = span > 1e-6 ? (guest.p[x] - h.min[x]) / span : 0.5;
-    if (Math.abs(v - 0.5) < 0.06) v = 0.5;        // midpoint
-    else if (v < 0.06) v = 0;                     // flush with the low side
-    else if (v > 0.94) v = 1;                     // flush with the high side
+    // ⭐ round ONLY along the joint, where a fraction is the right idea
+    if (Math.abs(v - 0.5) < 0.06) v = 0.5;
+    else if (Math.abs(v) < 0.06) v = 0;
+    else if (Math.abs(v - 1) < 0.06) v = 1;
     f[x] = v;
   });
-  return f;
+  return { ax, sgn, f };
 }
 
-function placeByFrac(host, guest, f) {
-  const h = ext(host);
-  AX.forEach(x => { guest.p[x] = h.min[x] + f[x] * (h.max[x] - h.min[x]); });
+function placeByRel(host, guest, r) {
+  const h = ext(host), g = ext(guest);
+  const half = (g.max[r.ax] - g.min[r.ax]) / 2;
+  // across: seated on the face, never in it
+  guest.p[r.ax] = (r.sgn > 0 ? h.max[r.ax] + half : h.min[r.ax] - half);
+  // along: the fraction he welded at
+  AX.forEach(x => {
+    if (x === r.ax) return;
+    guest.p[x] = h.min[x] + r.f[x] * (h.max[x] - h.min[x]);
+  });
   guest.mesh.position.copy(guest.p);
 }
+
+function cloneRel(r) { return r && { ax:r.ax, sgn:r.sgn, f:Object.assign({}, r.f) }; }
 
 // ⭐ WALK OUTWARD FROM WHAT HE CHANGED. The head moves the handle; if something
 //    is welded to the handle it moves too, and it is the same loop. ⛔ Each
@@ -1345,7 +1397,7 @@ function holdWelds(changed) {
       const o = w[0] === a ? w[1] : (w[1] === a ? w[0] : -1);
       if (o < 0 || done.has(o)) return;
       const host = SHAPES[a], guest = SHAPES[o];
-      if (host && guest && w.f) placeByFrac(host, guest, w.f[w[0] === a ? 1 : 0]);
+      if (host && guest && w.r) placeByRel(host, guest, w.r[w[0] === a ? 1 : 0]);
       done.add(o);
       queue.push(o);
     });
@@ -1369,7 +1421,7 @@ function weldDrop(sh) {
     // ⭐ BOTH DIRECTIONS, because either one of them can be the one he grabs.
     //    f[0] is where SHAPES[i] sits inside SHAPES[j]; f[1] the reverse.
     const pair = [me, j];
-    pair.f = [fracOf(o, sh), fracOf(sh, o)];
+    pair.r = [relOf(o, sh), relOf(sh, o)];
     WELDS.push(pair); n++;
   });
   return n ? ('welded to ' + n) : 'not touching anything';
@@ -1397,7 +1449,7 @@ function snapshot() {
           a0:sh.a0, b0:sh.b0, a1:sh.a1, b1:sh.b1 }),
     welds: WELDS.map(w => {
       const c = w.slice();
-      if (w.f) c.f = w.f.map(v => v.clone());
+      if (w.r) c.r = w.r.map(cloneRel);
       return c;
     }),
   });
@@ -1415,7 +1467,7 @@ function undo() {
   WELDS.length = 0;
   step.welds.forEach(w => {
     const c = w.slice();
-    if (w.f) c.f = w.f.map(v => v.clone());   // ⛔ the fraction IS the weld
+    if (w.r) c.r = w.r.map(cloneRel);         // ⛔ the relationship IS the weld
     WELDS.push(c);
   });
   was.forEach((w, i) => {
