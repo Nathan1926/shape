@@ -167,6 +167,12 @@
        picture a fabricator already reads without being told. -->
   <!-- ⭐ Two faces with arrows driving them together. Not a chain, not a
        magnet - the picture of the thing happening. -->
+  <!-- ⭐ A box with an arc over it. The picture of a part being rolled. -->
+  <button data-tool="turn" title="turn">
+    <svg viewBox="0 0 32 32"><path d="M8 17l8-4 8 4v7l-8 4-8-4z"/>
+      <path d="M8 17l8 4 8-4"/>
+      <path d="M7 9a11 11 0 0 1 18 0" stroke-linecap="round"/>
+      <path d="M25 4v5h-5" stroke-linejoin="round"/></svg></button>
   <button data-tool="mate" title="mate">
     <svg viewBox="0 0 32 32"><path d="M4 6v20M28 6v20"/>
       <path d="M9 16h5M23 16h-5"/><path d="M12 13l3 3-3 3M20 13l-3 3 3 3"
@@ -906,10 +912,13 @@ document.querySelectorAll('#box button').forEach(btn => {
     //    shape is dropped in a PLACE, so the drag ends where it belongs. Mate
     //    acts on two things somewhere else entirely; there is nowhere to drop
     //    it. ⭐ Drag out what has a destination; click what has a target.
-    if (btn.dataset.tool === 'mate') {
-      if (mateHeld) { dropTool(); return; }     // click it again to put it down
+    if (btn.dataset.tool === 'mate' || btn.dataset.tool === 'turn') {
+      const want = btn.dataset.tool;
+      const already = (want === 'mate' ? mateHeld : turnHeld);
       dropTool();
-      mateHeld = true; mateBtn = btn;
+      if (already) return;                     // click it again to put it down
+      if (want === 'mate') { mateHeld = true; mateBtn = btn; }
+      else { turnHeld = true; turnBtn = btn; }
       btn.classList.add('held');
       return;
     }
@@ -954,6 +963,95 @@ document.querySelectorAll('#box button').forEach(btn => {
     rebuild(sh);
   });
 });
+
+// ══ TURN ═════════════════════════════════════════════════════════════════
+// ⭐⭐⭐ THE THIRD TIME THIS HAS HAPPENED AND IT IS NOW A LAW OF THIS TOOL.
+//    A cone was not a new shape - it was a cylinder with two radii.
+//    An ellipse was not a new shape - it was a circle with two radii.
+//    ⭐ AND A QUARTER TURN IS NOT A ROTATION - IT IS SWAPPING TWO NUMBERS.
+//    Turn a box on its side and its width and its height trade places. Turn a
+//    cylinder and its axis letter changes from 'y' to 'x'. NOTHING ROTATES.
+//    The design record says look for this before writing a new primitive, and
+//    it has paid three times out of three.
+//
+// ⛔⛔ WHY NOT FREE ROTATION, STATED PLAINLY SO NOBODY RE-LITIGATES IT: every
+//    fast thing in this tool depends on shapes being axis-aligned. ext() is a
+//    subtraction. A face has one axis and one sign. Snap compares three
+//    numbers. A weld is a contact axis plus two fractions. Mate is a
+//    translation. ⛔ TILT ONE PART THIRTY DEGREES AND ALL FIVE OF THOSE NEED
+//    REWRITING, and push-pull - the thing he actually likes - is the first
+//    casualty. A quarter turn buys him the part on its side, which is what he
+//    asked for, and costs literally nothing.
+// ⚠️ WHAT IT HONESTLY WILL NOT DO: anything at forty-five degrees. When he
+//    wants that, it is the same conversation as cut - a real decision about
+//    the representation, not a patch.
+//
+// ⭐ AND IT TURNS IN THE PLANE HE IS LOOKING AT. Not about a fixed world axis -
+//    about whichever one points at the camera, so the part rolls the way the
+//    screen says it should. Click again and it keeps going round.
+let turnHeld = false, turnBtn = null;
+
+function viewAxis() {
+  const f = new THREE.Vector3();
+  camera.getWorldDirection(f);
+  const a = Math.abs(f.x), b = Math.abs(f.y), c = Math.abs(f.z);
+  return (a >= b && a >= c) ? 'x' : (b >= c ? 'y' : 'z');
+}
+
+// ⭐ the whole crew rolls together, about the part he clicked
+function quarterTurn(sh, ax) {
+  const rest = AX.filter(x => x !== ax);
+  const pAx = rest[0], qAx = rest[1];
+  const rot = new THREE.Quaternion().setFromAxisAngle(axisVec(ax), Math.PI / 2);
+  const centre = sh.p.clone();
+
+  crewOf(sh).forEach(o => {
+    // its own numbers trade places
+    if (o.kind === 'box') {
+      const t = o.s[pAx]; o.s[pAx] = o.s[qAx]; o.s[qAx] = t;
+    } else if (o.axis === pAx) { o.axis = qAx; }
+    else if (o.axis === qAx) { o.axis = pAx; }
+    else {
+      // ⭐ rolling a cylinder about its OWN axis is not nothing - an elliptical
+      //    end swaps which way it is wide. On a round one it is invisible, and
+      //    that is correct rather than broken.
+      let t = o.a0; o.a0 = o.b0; o.b0 = t;
+      t = o.a1; o.a1 = o.b1; o.b1 = t;
+    }
+    // and where it sits swings round the part he clicked
+    const rel = o.p.clone().sub(centre).applyQuaternion(rot);
+    // ⛔ exactly 90 degrees should stay exact - float dust here becomes a weld
+    //    that is one thousandth off, which snap and mate would then argue with
+    AX.forEach(x => { rel[x] = Math.round(rel[x] * 1e5) / 1e5; });
+    o.p.copy(centre).add(rel);
+    rebuild(o);
+  });
+
+  // ⭐ THE CONTACT AXIS OF EVERY WELD IN THE CREW HAS JUST CHANGED. Re-derive it
+  //    from where things actually are now rather than trying to rotate the old
+  //    relationship - the positions are right, so the relationship read off them
+  //    is right, and there is no arithmetic to get wrong.
+  const crew = crewOf(sh);
+  WELDS.forEach(w => {
+    const a = SHAPES[w[0]], b = SHAPES[w[1]];
+    if (!a || !b || crew.indexOf(a) < 0 || crew.indexOf(b) < 0) return;
+    w.r = [relOf(b, a), relOf(a, b)];
+  });
+  refreshWelds();
+}
+
+// ⭐ SHOW IT FIRST - the lesson mate taught, applied before he has to ask twice.
+function showTurnPreview(sh) {
+  if (!sh) { preview.visible = false; return; }
+  const ax = viewAxis();
+  const rest = AX.filter(x => x !== ax);
+  const e = ext(sh);
+  const sz = new THREE.Vector3().subVectors(e.max, e.min);
+  const t = sz[rest[0]]; sz[rest[0]] = sz[rest[1]]; sz[rest[1]] = t;
+  preview.scale.set(Math.max(sz.x, .01), Math.max(sz.y, .01), Math.max(sz.z, .01));
+  preview.position.copy(sh.p);
+  preview.visible = true;
+}
 
 // ══ MATE ═════════════════════════════════════════════════════════════════
 // ⭐⭐ JOE, 2026-08-20: *"Can you add a mate command? I press mate and then
@@ -1064,6 +1162,9 @@ function showPreview(b) {
 function dropTool() {
   mateA = null;
   mateHeld = false;
+  turnHeld = false;
+  if (turnBtn) turnBtn.classList.remove('held');
+  turnBtn = null;
   mark.visible = false;
   mark2.visible = false;
   preview.visible = false;
@@ -1574,7 +1675,7 @@ cv.addEventListener('pointerdown', (e) => {
   //    Pan lived because the right button is handled above this. Rotate died
   //    because it fell into here. ⛔ THE MIDDLE BUTTON IS HIS ROTATE - same as
   //    SolidWorks - so it must turn the view and never count as a pick.
-  if (mateHeld) {
+  if (mateHeld || turnHeld) {
     e.preventDefault();
     cv.setPointerCapture(e.pointerId);
     turning = { x:e.clientX, y:e.clientY, from:[e.clientX, e.clientY], btn:e.button };
@@ -1598,6 +1699,7 @@ cv.addEventListener('pointerdown', (e) => {
 
 cv.addEventListener('pointermove', (e) => {
   if (panning) { panBy(e); return; }
+  if (turnHeld && !turning) { const h = handleUnder(e); showTurnPreview(h && h.sh); return; }
   if (mateHeld && !turning) { showPreview(faceOf(handleUnder(e))); return; }
   if (drag) { moveDrag(e); return; }
   if (turning) {
@@ -1622,6 +1724,20 @@ function release(e) {
   // ⭐ A CLICK IS A PRESS THAT DID NOT TRAVEL. Judging it on release is what
   //    lets him orbit by dragging from anywhere - including from ON a shape -
   //    without ever picking a face he did not mean.
+  if (turnHeld && turning && turning.from) {
+    const still = Math.hypot(e.clientX - turning.from[0], e.clientY - turning.from[1]) < 6;
+    const wasLeft = turning.btn === 0;
+    turning = null;
+    if (still && wasLeft) {
+      const h = handleUnder(e);
+      // ⛔ the hook sits at the centre of the body and would swallow the click,
+      //    so read the shape, not the handle he happened to land on
+      if (h && h.sh) { snapshot(); quarterTurn(h.sh, viewAxis()); showTurnPreview(h.sh); }
+    }
+    drag = null; panning = null;
+    return;
+  }
+
   if (mateHeld && turning && turning.from) {
     const still = Math.hypot(e.clientX - turning.from[0], e.clientY - turning.from[1]) < 6;
     const wasLeft = turning.btn === 0;      // ⛔ only the left button picks
