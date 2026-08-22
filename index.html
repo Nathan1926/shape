@@ -204,7 +204,7 @@
 
 <!-- ⭐ THE BUILD SAYS ITS OWN NAME, on the screen and in the headset. Never
      again "did it even load" - look at the corner and you know. -->
-<div id="build">build 10</div>
+<div id="build">build 11</div>
 <button id="vr">ENTER VR</button>
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
@@ -2261,8 +2261,12 @@ renderer.xr.addEventListener('sessionstart', () => {
   //    was clipped away, and pulling a shape closer deleted it. The number
   //    never changed; the units under it did.
   // ⭐ Two centimetres in there, so he can bring a part right up to his nose.
+  // ⚠️ 0.02 to 2000 is a hundred-thousand-to-one depth range and the buffer
+  //    cannot hold it - which is what ate the backs of his shapes. Two
+  //    centimetres to two hundred metres is plenty for a part at arm's length
+  //    and keeps the precision where he is looking.
   camera.near = 0.02;
-  camera.far = 2000;
+  camera.far = 200;
   camera.updateProjectionMatrix();
 
   needPlace = true;          // ⛔ not now - on the first frame, when he exists
@@ -2432,50 +2436,94 @@ function shapeNear(at) {
   return best;
 }
 
-// ══ THE WORLD IN TWO HANDS ══════════════════════════════
-// ⭐⭐ PINCH BOTH AND THE WORLD ITSELF IS THE THING YOU ARE HOLDING - pull
-//    apart to grow it, together to shrink it, drag to slide it. This is the
-//    replacement for the thumbstick, and it is the one thing in here that is
-//    plainly better than a mouse rather than merely equal to it.
-// ⛔ It only starts when NEITHER hand has hold of a shape, so grabbing a part
-//    with both hands never yanks the room out from under him.
-let world = null;
-const WA = new THREE.Vector3(), WB = new THREE.Vector3(), WMID = new THREE.Vector3();
+// ══ TWO HANDS ═══════════════════════════════════════════
+// ⛔⛔ HIS FIELD REPORT KILLED THIS FEATURE AND HE WAS RIGHT TO. Two pinched
+//    hands used to drive WORLD SCALE. Three things wrong with that:
+//    1. It was a command he could not see. *"any hand movement is a command
+//       I can't see."*
+//    2. Scaling the world moves the part AND your distance to it by the same
+//       factor, so the part never changes apparent size - it just retreats
+//       into the far distance until the depth buffer eats it. His words:
+//       *"the shapes stay the same apparent size but get progressively sliced
+//       away from the back."* That is not a zoom. It is a treadmill.
+//    3. It stole the gesture he actually wanted.
+//
+// ⭐⭐ SO TWO HANDS NOW HOLD THE PART, NOT THE ROOM. Pinch the same shape with
+//    both hands and pull apart to make it bigger, together to make it
+//    smaller. It grows about the point between your hands, so it stays where
+//    you are holding it.
+//
+// ⚠️ WHAT HE ASKED FOR AND IS NOT HERE: *"if that cube were a cardboard box
+//    I'd take a corner in each hand and turn it."* Not today, and not because
+//    it is hard to detect. Every shape in this file is stored as axis-aligned
+//    numbers - which is exactly the property that lets a hole be subtracted
+//    per pixel with three lines of arithmetic instead of a boolean. Free
+//    rotation breaks that, and the handles, mate, weld and snap all lean on
+//    it too. It is a real job, not a patch, and it should be decided on
+//    purpose rather than smuggled in.
+let both = null;
+const H0 = new THREE.Vector3(), H1 = new THREE.Vector3(), HMID = new THREE.Vector3();
 
-function worldGrab(pa, pb) {
-  const bothFree = !hands[0].userData.grab && !hands[1].userData.grab;
-  if (!(pa && pb && pa.gap < PINCH_ON && pb.gap < PINCH_ON && bothFree)) {
-    if (world && !(pa && pb && pa.gap < PINCH_OFF && pb.gap < PINCH_OFF)) world = null;
-    if (!world) return false;
+function sizeOf(sh) {
+  return sh.kind === 'box'
+    ? { s: sh.s.clone() }
+    : { h: sh.h, a0: sh.a0, b0: sh.b0, a1: sh.a1, b1: sh.b1 };
+}
+
+function scaleTo(sh, was, k) {
+  if (sh.kind === 'box') {
+    sh.s.copy(was.s).multiplyScalar(k);
+  } else {
+    sh.h = was.h * k;
+    sh.a0 = was.a0 * k; sh.b0 = was.b0 * k;
+    sh.a1 = was.a1 * k; sh.b1 = was.b1 * k;
   }
-  WA.copy(pa.local); WB.copy(pb.local);
-  const span = Math.max(WA.distanceTo(WB), 0.02);
-  WMID.addVectors(WA, WB).multiplyScalar(0.5);
-  if (!world) {
-    // the world point under the midpoint is the one that must not move
-    world = { span, anchor: WMID.clone().multiplyScalar(xrRig.scale.x)
-                                .applyQuaternion(xrRig.quaternion).add(xrRig.position),
-              scale: xrRig.scale.x };
+}
+
+function twoHands(pa, pb) {
+  const live = pa && pb && pa.gap < PINCH_OFF && pb.gap < PINCH_OFF;
+  if (!live) { both = null; return false; }
+
+  H0.copy(pa.at); H1.copy(pb.at);
+  const span = Math.max(H0.distanceTo(H1), 1e-4);
+  HMID.addVectors(H0, H1).multiplyScalar(0.5);
+
+  if (!both) {
+    if (pa.gap > PINCH_ON || pb.gap > PINCH_ON) return false;
+    // both hands must be closing on the SAME shape, or this is not a grab
+    const sa = shapeNear(pa.at), sb = shapeNear(pb.at);
+    if (!sa || sa !== sb) return false;
+    snapshot();
+    both = { sh: sa, span, was: sizeOf(sa), p0: sa.p.clone(), mid: HMID.clone() };
     return true;
   }
-  const S = THREE.MathUtils.clamp(world.scale * (world.span / span), 0.02, 100000);
-  xrRig.scale.setScalar(S);
-  xrRig.position.copy(world.anchor).sub(
-    WMID.clone().multiplyScalar(S).applyQuaternion(xrRig.quaternion));
+
+  const k = THREE.MathUtils.clamp(span / both.span, 0.15, 8);
+  scaleTo(both.sh, both.was, k);
+  // ⭐ it grows about the point between his hands, so it stays where he holds it
+  both.sh.p.copy(both.p0).sub(both.mid).multiplyScalar(k).add(HMID);
+  rebuild(both.sh);
+  handMoved = true;
   return true;
 }
 
 function handsUpdate() {
   const p = [pinchOf(hands[0]), pinchOf(hands[1])];
   hands.forEach(dressHand);
-  // ⛔ JOE, four times now: *"laser beams for hands."* Because I put one there.
-  //    The ray belongs to a controller. A hand that has joints does not need a
-  //    beam - it needs to be near the thing.
+  // ⛔ a hand with joints is not a laser. Take the beam off it.
   hands.forEach((h, i) => {
     const ray = controllers[i].children[0];
     if (ray) ray.visible = Object.keys(h.joints).length === 0;
   });
-  const holdingWorld = worldGrab(p[0], p[1]);
+
+  // ⭐ the way home, and it is a thing he can SEE and touch
+  if (resetPoked(p)) return;
+
+  const holdingBoth = twoHands(p[0], p[1]);
+  if (holdingBoth) {
+    hands.forEach(h => { h.userData.grab = null; h.userData.pinching = true; });
+    return;
+  }
 
   hands.forEach((h, i) => {
     const q = p[i];
@@ -2483,12 +2531,11 @@ function handsUpdate() {
 
     if (!h.userData.pinching && q.gap < PINCH_ON) {
       h.userData.pinching = true;
-      if (holdingWorld) return;                  // both hands are on the world
       const sh = shapeNear(q.at);
       if (sh) { snapshot(); h.userData.grab = { sh, off: sh.p.clone().sub(q.at) }; }
     } else if (h.userData.pinching && q.gap > PINCH_OFF) {
-      h.userData.pinching = false;               // ⭐ let go wider than you grab,
-      h.userData.grab = null;                    //    or it drops things by itself
+      h.userData.pinching = false;      // ⭐ let go wider than you grab, or it
+      h.userData.grab = null;           //    drops things by itself
     }
 
     const g = h.userData.grab;
@@ -2528,6 +2575,41 @@ HUD.visible = false;
 //    I changed a working thing to fix a bug it did not have.
 scene.add(HUD);
 
+// ══ THE WAY HOME ════════════════════════════════════════
+// ⭐⭐ HIS FIRST ASK: *"a reset - one gesture or button that puts the world
+//    back to arm's length, because grab only becomes usable at one particular
+//    scale and I had to find it by accident."*
+// ⛔ A GESTURE WOULD BE ANOTHER INVISIBLE COMMAND, which is the exact thing he
+//    just told me off for. So it is a PLATE. He can see it, he pinches it,
+//    the part comes back to his hands. Nothing to remember.
+const RSTC = document.createElement('canvas');
+RSTC.width = 256; RSTC.height = 128;
+const RX = RSTC.getContext('2d');
+RX.fillStyle = '#16222c'; RX.fillRect(0, 0, 256, 128);
+RX.strokeStyle = '#9ad1ff'; RX.lineWidth = 3; RX.strokeRect(3, 3, 250, 122);
+RX.fillStyle = '#9ad1ff'; RX.font = '700 40px ui-monospace, monospace';
+RX.fillText('RESET', 52, 78);
+const RESET = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.10, 0.05),
+  new THREE.MeshBasicMaterial({ map:new THREE.CanvasTexture(RSTC),
+                                transparent:true, depthTest:false }));
+RESET.renderOrder = 999;
+RESET.visible = false;
+RESET.frustumCulled = false;
+scene.add(RESET);
+
+let resetArmed = true;
+function resetPoked(p) {
+  if (!RESET.visible) return false;
+  const hit = p.some(q => q && q.gap < PINCH_ON
+                       && q.at.distanceTo(RESET.position) < 0.07 * xrRig.scale.x);
+  if (!hit) { resetArmed = true; return false; }
+  if (!resetArmed) return true;
+  resetArmed = false;
+  needPlace = true;
+  return true;
+}
+
 let hudNext = 0;
 const HUDPOS = new THREE.Vector3(), HUDF = new THREE.Vector3(), HUDQ = new THREE.Quaternion();
 const TETHC = new THREE.Vector3(), TETHV = new THREE.Vector3();
@@ -2543,7 +2625,7 @@ function hudLines() {
   const out = [];
   const session = renderer.xr.getSession();
   const srcs = session ? Array.from(session.inputSources) : [];
-  out.push('BUILD 10  sources ' + srcs.length
+  out.push('BUILD 11  sources ' + srcs.length
            + '   scale ' + xrRig.scale.x.toFixed(0) + '   near ' + camera.near);
   srcs.forEach(src => {
     out.push('  ' + (src.handedness || '?') + '  ' + (src.targetRayMode || '?')
@@ -2578,9 +2660,16 @@ function hudLines() {
     out.push('head ' + HEADL.y.toFixed(2) + ' m   rig '
              + xrRig.position.x.toFixed(0) + ',' + xrRig.position.y.toFixed(0)
              + ',' + xrRig.position.z.toFixed(0));
-    out.push('part ' + (to.length() / S).toFixed(2) + ' m   '
+    // ⛔ HE CAUGHT THIS: *"the field labelled part does not report the part."*
+    //    It reported a distance in METRES computed by dividing world units by
+    //    a scale that his own hands were changing - so it moved when he moved
+    //    his hands and looked like it was tracking the gesture. It was. Now
+    //    the scale only changes when the part is re-placed, so the number
+    //    means what it says. Labelled REACH, because that is what it is.
+    out.push('reach ' + (to.length() / S).toFixed(2) + ' m   turn '
              + Math.abs(deg) + (deg > 0 ? ' left' : ' right')
-             + '   ' + (to.y / S > 0.3 ? 'ABOVE' : to.y / S < -0.3 ? 'BELOW' : 'level'));
+             + '   ' + (to.y / S > 0.3 ? 'above' : to.y / S < -0.3 ? 'below' : 'level'));
+    out.push(both ? 'BOTH HANDS - RESIZING' : '');
   }
   return out;
 }
@@ -2608,6 +2697,12 @@ function hud(now) {
   HUD.position.y -= 0.22 * S;
   HUD.quaternion.copy(HUDQ);
   HUD.scale.setScalar(S);
+  // the plate sits just left of the readout, on the same pane
+  RESET.visible = true;
+  RESET.quaternion.copy(HUDQ);
+  RESET.scale.setScalar(S);
+  RESET.position.copy(HUD.position)
+       .addScaledVector(new THREE.Vector3(1,0,0).applyQuaternion(HUDQ), -0.24 * S);
   if (now > hudNext) { hudNext = now + 250; drawHud(); }
 
   // ⭐⭐ THE TETHER, AND IT ENDS BEING LOST FOR GOOD. A bright line from just
@@ -2699,6 +2794,7 @@ renderer.setAnimationLoop(() => {
     if (handMoved) { syncCuts(); refreshWelds(); }
   } else {
     HUD.visible = false;
+    RESET.visible = false;
     TETH.visible = false;
     holdFraming();                                   // the desktop path, untouched
     placeCamera();
