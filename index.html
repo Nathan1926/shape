@@ -2192,12 +2192,29 @@ renderer.xr.addEventListener('sessionstart', () => {
   // ⛔ It comes straight back when he takes them off, where it is still doing
   //    a job.
   grid.visible = false;
+
+  // ⛔⛔ JOE: *"they come a little closer, maybe a little bit, but they
+  //    disappear a lot, and I can't get very much closer."* THAT IS A WALL OF
+  //    GLASS ONE METRE FROM HIS FACE AND I PUT IT THERE.
+  // ⚠️ The near plane is 1 - which on the desktop means one WORLD UNIT, a
+  //    millimetre of a part. In a headset the same number is handed to the
+  //    device as DEPTH IN METRES. So everything within a metre of his eyes
+  //    was clipped away, and pulling a shape closer deleted it. The number
+  //    never changed; the units under it did.
+  // ⭐ Two centimetres in there, so he can bring a part right up to his nose.
+  camera.near = 0.02;
+  camera.far = 2000;
+  camera.updateProjectionMatrix();
+
   placeRig();
 });
 
 renderer.xr.addEventListener('sessionend', () => {
   VRB.textContent = 'ENTER VR';
   grid.visible = true;
+  camera.near = 1;                 // back to world units for the flat screen
+  camera.far = 6000;
+  camera.updateProjectionMatrix();
   xrRig.position.set(0, 0, 0);
   xrRig.quaternion.identity();
   xrRig.scale.setScalar(1);
@@ -2236,10 +2253,33 @@ const controllers = [0, 1].map(i => {
   return c;
 });
 
-function carry() {
+// ⭐ RIGHT STICK UP AND DOWN PUSHES A HELD SHAPE OUT AND REELS IT IN. With a
+//    laser, the thing you grabbed stays at the distance you grabbed it, which
+//    is exactly the stuck feeling he described. This is the controller
+//    answer; the hand answer is to just walk up and take it.
+const XRPUSH = new THREE.Vector3(), XRPM = new THREE.Matrix4();
+
+function pushAxis() {
+  const session = renderer.xr.getSession();
+  if (!session) return 0;
+  for (const src of session.inputSources) {
+    if (src.handedness !== 'right') continue;
+    const gp = src.gamepad;
+    if (gp && gp.axes.length >= 4 && Math.abs(gp.axes[3]) > 0.15) return gp.axes[3];
+  }
+  return 0;
+}
+
+function carry(dt) {
   let moved = false;
+  const push = pushAxis();
   grabbed.forEach((g, i) => {
     if (!g) return;
+    if (push) {
+      XRPM.identity().extractRotation(controllers[i].matrixWorld);
+      XRPUSH.set(0, 0, -1).applyMatrix4(XRPM).normalize();
+      g.off.addScaledVector(XRPUSH, -push * 1.4 * xrRig.scale.x * dt);
+    }
     XRP.setFromMatrixPosition(controllers[i].matrixWorld);
     g.sh.p.copy(XRP).add(g.off);
     g.sh.mesh.position.copy(g.sh.p);
@@ -2445,7 +2485,7 @@ renderer.setAnimationLoop(() => {
     walk(dt);                                    // sticks, if he is on controllers
     handMoved = false;
     handsUpdate();                               // hands, if he is on hands
-    carry();
+    carry(dt);
     if (handMoved) { syncCuts(); refreshWelds(); }
   } else {
     holdFraming();                                   // the desktop path, untouched
