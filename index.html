@@ -2164,24 +2164,40 @@ VRB.addEventListener('click', async () => {
 //    across and a man is 1.6 metres, so the rig is scaled to bring the part
 //    to about arm's reach. Read it off the ACTUAL bounds and it works the
 //    same for a bracket or a bridge.
+// ⭐⭐ JOE: *"I feel like a lobster."* A laser pointer held at arm's length is
+//    a mouse with extra steps, and the part being across the room is what
+//    FORCES the laser. So the part comes to him instead: about the size of a
+//    melon, floating where his hands already are. Then reaching for it is
+//    just reaching for it.
+// ⚠️ AND HE CAN CHANGE IT - both hands pinched, pull apart to grow the world,
+//    together to shrink it, drag to slide it. See worldGrab().
 function placeRig() {
   const b = bounds();
   const c = b.getCenter(new THREE.Vector3());
   const r = Math.max(b.getBoundingSphere(new THREE.Sphere()).radius, 1);
-  const S = r / 0.9;                       // the part reads about 1.8 m across
+  const S = r / 0.3;                       // the part reads about 0.6 m across
   xrRig.scale.setScalar(S);
   xrRig.quaternion.identity();
-  // eyes land level with the middle of the part, a couple of paces back
-  xrRig.position.set(c.x, c.y - 1.5 * S, c.z + 2.4 * S);
+  // the middle of the part sits at chest height, three quarters of a metre out
+  xrRig.position.set(c.x, c.y - 1.25 * S, c.z + 0.75 * S);
 }
 
 renderer.xr.addEventListener('sessionstart', () => {
   VRB.textContent = 'LEAVE VR';
+  // ⭐⭐ JOE: *"I think I'd prefer nothing at all to the grid."* Agreed, and
+  //    there is a reason it stops earning its keep in there. The grid exists
+  //    because a solid floating in a void has no depth cue ON A FLAT SCREEN.
+  //    In a headset he has two eyes and parallax, so the depth arrives for
+  //    free and the grid is just a floor that is not really there.
+  // ⛔ It comes straight back when he takes them off, where it is still doing
+  //    a job.
+  grid.visible = false;
   placeRig();
 });
 
 renderer.xr.addEventListener('sessionend', () => {
   VRB.textContent = 'ENTER VR';
+  grid.visible = true;
   xrRig.position.set(0, 0, 0);
   xrRig.quaternion.identity();
   xrRig.scale.setScalar(1);
@@ -2233,12 +2249,152 @@ function carry() {
   if (moved) { syncCuts(); refreshWelds(); }
 }
 
+// ══ HANDS ═══════════════════════════════════════════════
+// ⭐⭐ HIS FIRST PREFERENCE, AND HE IS RIGHT: *"hands first, if that just
+//    doesn't work then we'll go back to using the laser things."*
+// ⛔ THE POINT IS NOT THAT HANDS ARE A NICER POINTER. IT IS THAT THEY ARE NOT
+//    A POINTER AT ALL. A pointer picks a thing and then you fly it with a
+//    stick. A hand goes to where the thing is and closes on it, which is the
+//    one motion a mouse has never been able to make - and it is the motion
+//    SWEEP is made of.
+// ⚠️ HAND TRACKING HAS TO BE ON IN THE HEADSET AND THE CONTROLLERS PUT DOWN.
+//    If the joints never arrive, nothing here fires and the controllers still
+//    work exactly as before. Nothing is lost by trying.
+const PINCH_ON = 0.022, PINCH_OFF = 0.035;      // metres, thumb tip to index tip
+const JOINTMAT = new THREE.MeshBasicMaterial({ color:0x9ad1ff });
+const JOINTGEO = new THREE.SphereGeometry(1, 8, 6);
+
+const hands = [0, 1].map(i => {
+  const h = renderer.xr.getHand(i);
+  xrRig.add(h);                                  // ⭐ inherits the rig's scale
+  h.userData.pinching = false;
+  h.userData.grab = null;
+  return h;
+});
+
+// ⭐ he has to SEE his hands or he cannot aim them. One dot per joint, sized
+//    from the joint's own radius, so it is his hand and not a glove.
+function dressHand(h) {
+  for (const name in h.joints) {
+    const j = h.joints[name];
+    if (!j.userData.dot) {
+      j.userData.dot = new THREE.Mesh(JOINTGEO, JOINTMAT);
+      j.add(j.userData.dot);
+    }
+    j.userData.dot.scale.setScalar(j.jointRadius || 0.008);
+  }
+}
+
+const TIP = new THREE.Vector3(), THU = new THREE.Vector3(), PIN = new THREE.Vector3();
+
+function pinchOf(h) {
+  const a = h.joints['index-finger-tip'], b = h.joints['thumb-tip'];
+  if (!a || !b) return null;
+  // ⛔ MEASURE THE PINCH IN METRES, NOT IN WORLD UNITS. These are local to the
+  //    rig, so they stay in metres however far the world is scaled - which is
+  //    the whole reason the gesture keeps working when he zooms.
+  const gap = a.position.distanceTo(b.position);
+  a.getWorldPosition(TIP);
+  b.getWorldPosition(THU);
+  PIN.addVectors(TIP, THU).multiplyScalar(0.5);
+  return { gap, at: PIN.clone(), local: a.position.clone().add(b.position).multiplyScalar(0.5) };
+}
+
+// ⭐ CLOSE ON IT, DO NOT AIM AT IT. Nearest shape whose skin is within a few
+//    centimetres of the pinch - measured in HIS metres, so the reach does not
+//    change when the world does.
+const NEARBOX = new THREE.Box3();
+function shapeNear(at) {
+  const tol = 0.06 * xrRig.scale.x;
+  let best = null, bestD = tol;
+  SHAPES.forEach(sh => {
+    const m = (sh.mesh && sh.mesh.visible) ? sh.mesh
+            : (sh.wall && sh.wall.visible) ? sh.wall : null;
+    if (!m) return;
+    NEARBOX.setFromObject(m);
+    const d = NEARBOX.distanceToPoint(at);
+    if (d < bestD) { bestD = d; best = sh; }
+  });
+  return best;
+}
+
+// ══ THE WORLD IN TWO HANDS ══════════════════════════════
+// ⭐⭐ PINCH BOTH AND THE WORLD ITSELF IS THE THING YOU ARE HOLDING - pull
+//    apart to grow it, together to shrink it, drag to slide it. This is the
+//    replacement for the thumbstick, and it is the one thing in here that is
+//    plainly better than a mouse rather than merely equal to it.
+// ⛔ It only starts when NEITHER hand has hold of a shape, so grabbing a part
+//    with both hands never yanks the room out from under him.
+let world = null;
+const WA = new THREE.Vector3(), WB = new THREE.Vector3(), WMID = new THREE.Vector3();
+
+function worldGrab(pa, pb) {
+  const bothFree = !hands[0].userData.grab && !hands[1].userData.grab;
+  if (!(pa && pb && pa.gap < PINCH_ON && pb.gap < PINCH_ON && bothFree)) {
+    if (world && !(pa && pb && pa.gap < PINCH_OFF && pb.gap < PINCH_OFF)) world = null;
+    if (!world) return false;
+  }
+  WA.copy(pa.local); WB.copy(pb.local);
+  const span = Math.max(WA.distanceTo(WB), 0.02);
+  WMID.addVectors(WA, WB).multiplyScalar(0.5);
+  if (!world) {
+    // the world point under the midpoint is the one that must not move
+    world = { span, anchor: WMID.clone().multiplyScalar(xrRig.scale.x)
+                                .applyQuaternion(xrRig.quaternion).add(xrRig.position),
+              scale: xrRig.scale.x };
+    return true;
+  }
+  const S = THREE.MathUtils.clamp(world.scale * (world.span / span), 0.02, 100000);
+  xrRig.scale.setScalar(S);
+  xrRig.position.copy(world.anchor).sub(
+    WMID.clone().multiplyScalar(S).applyQuaternion(xrRig.quaternion));
+  return true;
+}
+
+function handsUpdate() {
+  const p = [pinchOf(hands[0]), pinchOf(hands[1])];
+  hands.forEach(dressHand);
+  const holdingWorld = worldGrab(p[0], p[1]);
+
+  hands.forEach((h, i) => {
+    const q = p[i];
+    if (!q) { h.userData.pinching = false; h.userData.grab = null; return; }
+
+    if (!h.userData.pinching && q.gap < PINCH_ON) {
+      h.userData.pinching = true;
+      if (holdingWorld) return;                  // both hands are on the world
+      const sh = shapeNear(q.at);
+      if (sh) { snapshot(); h.userData.grab = { sh, off: sh.p.clone().sub(q.at) }; }
+    } else if (h.userData.pinching && q.gap > PINCH_OFF) {
+      h.userData.pinching = false;               // ⭐ let go wider than you grab,
+      h.userData.grab = null;                    //    or it drops things by itself
+    }
+
+    const g = h.userData.grab;
+    if (!g) return;
+    g.sh.p.copy(q.at).add(g.off);
+    g.sh.mesh.position.copy(g.sh.p);
+    if (g.sh.wall) g.sh.wall.position.copy(g.sh.p);
+    handMoved = true;
+  });
+}
+
+let handMoved = false;
+
 // ══ WALKING ═════════════════════════════════════════════
-// ⭐ left stick slides, right stick turns IN STEPS. ⚠️ Steps, not a smooth
-//    spin - a smooth spin is what makes people sick, and a man who feels sick
-//    in this thing will never put it back on.
+// ⭐ left stick slides, right stick turns SMOOTHLY.
+// ⚠️⚠️ I BUILT SNAP TURNING FIRST, ON THE STANDARD ARGUMENT THAT A SMOOTH SPIN
+//    IS WHAT MAKES PEOPLE SICK. He overruled it, and his reasoning is better
+//    than mine was: *"I'd rather take the chance of being made sick... I like
+//    the feeling of the reality of moving forward."*
+// ⭐ THE STANDARD ARGUMENT IS ABOUT A POPULATION AND HE IS ONE MAN WHO HAS
+//    NEVER BEEN MOTION SICK. A rule written for strangers should not outrank
+//    the only person who is going to wear this. Off in one line if he is
+//    wrong: set SMOOTH_TURN to false.
 const XRF = new THREE.Vector3(), XRSIDE = new THREE.Vector3(), XRUP = new THREE.Vector3(0,1,0);
 const XRQ = new THREE.Quaternion(), XREYE = new THREE.Vector3();
+const SMOOTH_TURN = true;         // ⚠️ his call - flip to false for step turns
+const TURN_RATE = 1.7;            // radians a second at full stick
 let snapped = false;
 
 function turnRig(a) {
@@ -2256,7 +2412,11 @@ function walk(dt) {
     if (!gp || gp.axes.length < 4) continue;
     const ax = gp.axes[2], ay = gp.axes[3];
     if (src.handedness === 'right') {
-      if (Math.abs(ax) > 0.7) {
+      if (SMOOTH_TURN) {
+        // ⭐ squared, so a small push is a slow look-around and a hard push is
+        //    a real turn. A linear stick makes fine aiming impossible.
+        if (Math.abs(ax) > 0.12) turnRig(-Math.sign(ax) * ax * ax * TURN_RATE * dt);
+      } else if (Math.abs(ax) > 0.7) {
         if (!snapped) { snapped = true; turnRig(-Math.sign(ax) * Math.PI / 6); }
       } else if (Math.abs(ax) < 0.3) snapped = false;
       continue;
@@ -2282,8 +2442,11 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   if (renderer.xr.isPresenting) {
-    walk(dt);
+    walk(dt);                                    // sticks, if he is on controllers
+    handMoved = false;
+    handsUpdate();                               // hands, if he is on hands
     carry();
+    if (handMoved) { syncCuts(); refreshWelds(); }
   } else {
     holdFraming();                                   // the desktop path, untouched
     placeCamera();
