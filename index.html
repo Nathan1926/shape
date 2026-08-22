@@ -204,7 +204,7 @@
 
 <!-- ⭐ THE BUILD SAYS ITS OWN NAME, on the screen and in the headset. Never
      again "did it even load" - look at the corner and you know. -->
-<div id="build">build 11</div>
+<div id="build">build 12</div>
 <button id="vr">ENTER VR</button>
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
@@ -362,9 +362,19 @@ function axisVec(a) {
 //    technique - a uniform array size, raised by changing one number.
 const MAXCUT = 4, MAXSOL = 8;
 
+// ⭐⭐ JOE: *"if that cube were a cardboard box I'd take a corner in each hand
+//    and turn it."* I told him the shapes were stored axis-aligned and asked
+//    him to work around it. ⛔ SECTION ZERO SAYS THAT IS THE WRONG SIDE OF THE
+//    LINE: *the AI holds the model; the human holds imagination and
+//    judgment.* He gave me intent and I answered with plumbing.
+// ⭐ SO EVERY SHAPE NOW CARRIES A ROTATION, and the cut honours it. The
+//    subtraction is still three lines of arithmetic - it just asks the
+//    question in the shape's own frame instead of the world's. Turning the
+//    point is cheaper than turning the shape.
 function emptySlot() {
   return { on:0, kind:0, c:new THREE.Vector3(), h:new THREE.Vector3(),
-           ax:1, r0:new THREE.Vector2(1,1), r1:new THREE.Vector2(1,1) };
+           ax:1, r0:new THREE.Vector2(1,1), r1:new THREE.Vector2(1,1),
+           rot:new THREE.Vector4(0, 0, 0, 1) };
 }
 
 // ⭐ ONE SET OF UNIFORM OBJECTS, SHARED BY REFERENCE with every material in the
@@ -383,11 +393,16 @@ const CUT_U = {
 //    he has drawn up into a cone cuts a tapered hole, for free.
 const CUT_GLSL = `
 struct Solid {
-  float on; float kind; vec3 c; vec3 h; float ax; vec2 r0; vec2 r1;
+  float on; float kind; vec3 c; vec3 h; float ax; vec2 r0; vec2 r1; vec4 rot;
 };
+// ⭐ turn the POINT into the shape's frame, not the shape into the world's.
+vec3 unrot(vec4 q, vec3 v) {
+  vec3 u = -q.xyz;                                    // the inverse rotation
+  return v + 2.0 * cross(u, cross(u, v) + q.w * v);
+}
 bool insideOne(Solid s, vec3 p) {
   if (s.on < 0.5) return false;
-  vec3 d = p - s.c;
+  vec3 d = unrot(s.rot, p - s.c);
   if (s.kind < 0.5) {
     return all(lessThanEqual(abs(d), s.h));
   }
@@ -417,7 +432,7 @@ const float CUTEPS = 0.35;
 
 bool insideShrunk(Solid s, vec3 p) {
   if (s.on < 0.5) return false;
-  vec3 d = p - s.c;
+  vec3 d = unrot(s.rot, p - s.c);
   if (s.kind < 0.5) {
     return all(lessThanEqual(abs(d), max(s.h - vec3(CUTEPS), vec3(0.0))));
   }
@@ -497,6 +512,8 @@ function paintShader(mat) {
 function fillSlot(slot, sh) {
   slot.on = 1;
   slot.c.copy(sh.p);
+  const q = sh.q || IDQ;
+  slot.rot.set(q.x, q.y, q.z, q.w);
   if (sh.kind === 'box') {
     slot.kind = 0;
     slot.h.copy(sh.s).multiplyScalar(0.5);
@@ -525,6 +542,21 @@ function refreshCuts() {
 
 // ⭐ A CUTTER LOOKS LIKE A TOOL, NOT LIKE A PART. Wireframe, so he can see
 //    where it is and grab it, and can never mistake it for material.
+// ⭐ the resting orientation, and the one every shape starts at
+const IDQ = new THREE.Quaternion();
+const BASEQ = new THREE.Quaternion(), AXX = new THREE.Vector3(1,0,0), AXZ = new THREE.Vector3(0,0,1);
+
+// ⭐ a cylinder's geometry is built along Y, so 'x' and 'z' cylinders carry a
+//    quarter turn of their own. His free rotation rides ON TOP of that.
+function poseOf(sh, o) {
+  BASEQ.identity();
+  if (sh.kind === 'cyl') {
+    if (sh.axis === 'x') BASEQ.setFromAxisAngle(AXZ, Math.PI / 2);
+    else if (sh.axis === 'z') BASEQ.setFromAxisAngle(AXX, Math.PI / 2);
+  }
+  o.quaternion.copy(sh.q || IDQ).multiply(BASEQ);
+}
+
 const CUTMAT = new THREE.MeshBasicMaterial({ color:0xff9a5c, wireframe:true,
                                              transparent:true, opacity:0.75 });
 
@@ -588,18 +620,11 @@ function rebuild(sh) {
     sh.wall = new THREE.Mesh(g, WALLMAT);
     sh.wall.userData.shape = sh;      // ⭐ grabbing the wall grabs the hole
     sh.wall.position.copy(sh.p);
-    sh.wall.rotation.set(0, 0, 0);
-    if (sh.kind === 'cyl') {
-      if (sh.axis === 'x') sh.wall.rotation.z = Math.PI / 2;
-      if (sh.axis === 'z') sh.wall.rotation.x = Math.PI / 2;
-    }
+    poseOf(sh, sh.wall);
     scene.add(sh.wall);
   }
   sh.mesh.position.copy(sh.p);
-  if (sh.kind === 'cyl') {
-    if (sh.axis === 'x') sh.mesh.rotation.z = Math.PI / 2;
-    if (sh.axis === 'z') sh.mesh.rotation.x = Math.PI / 2;
-  }
+  poseOf(sh, sh.mesh);
   sh.mesh.userData.shape = sh;
   scene.add(sh.mesh);
   if (typeof refreshCuts === 'function') refreshCuts();
@@ -1888,9 +1913,10 @@ const PAST_MAX = 40;
 function snapshot() {
   past.push({
     shapes: SHAPES.map(sh => sh.kind === 'box'
-      ? { kind:'box', p:sh.p.clone(), s:sh.s.clone(), neg:!!sh.neg }
+      ? { kind:'box', p:sh.p.clone(), s:sh.s.clone(), neg:!!sh.neg,
+          q:(sh.q || IDQ).clone() }
       : { kind:'cyl', p:sh.p.clone(), axis:sh.axis, h:sh.h, neg:!!sh.neg,
-          a0:sh.a0, b0:sh.b0, a1:sh.a1, b1:sh.b1 }),
+          a0:sh.a0, b0:sh.b0, a1:sh.a1, b1:sh.b1, q:(sh.q || IDQ).clone() }),
     welds: WELDS.map(w => {
       const c = w.slice();
       if (w.r) c.r = w.r.map(cloneRel);
@@ -1919,6 +1945,7 @@ function undo() {
     const sh = SHAPES[i];
     sh.p.copy(w.p);
     sh.neg = !!w.neg;
+    if (w.q) { if (!sh.q) sh.q = new THREE.Quaternion(); sh.q.copy(w.q); }
     if (sh.kind === 'box') sh.s.copy(w.s);
     else { sh.h = w.h; sh.a0 = w.a0; sh.b0 = w.b0; sh.a1 = w.a1; sh.b1 = w.b1; }
     rebuild(sh);
@@ -2463,6 +2490,8 @@ function shapeNear(at) {
 //    purpose rather than smuggled in.
 let both = null;
 const H0 = new THREE.Vector3(), H1 = new THREE.Vector3(), HMID = new THREE.Vector3();
+const AXIS0 = new THREE.Vector3(), AXIS1 = new THREE.Vector3();
+const DQ = new THREE.Quaternion(), OFFV = new THREE.Vector3();
 
 function sizeOf(sh) {
   return sh.kind === 'box'
@@ -2494,14 +2523,35 @@ function twoHands(pa, pb) {
     const sa = shapeNear(pa.at), sb = shapeNear(pb.at);
     if (!sa || sa !== sb) return false;
     snapshot();
-    both = { sh: sa, span, was: sizeOf(sa), p0: sa.p.clone(), mid: HMID.clone() };
+    if (!sa.q) sa.q = new THREE.Quaternion();
+    both = { sh: sa, span, was: sizeOf(sa), p0: sa.p.clone(), mid: HMID.clone(),
+             axis: AXIS1.copy(H1).sub(H0).normalize().clone(), q0: sa.q.clone() };
     return true;
   }
 
   const k = THREE.MathUtils.clamp(span / both.span, 0.15, 8);
   scaleTo(both.sh, both.was, k);
-  // ⭐ it grows about the point between his hands, so it stays where he holds it
-  both.sh.p.copy(both.p0).sub(both.mid).multiplyScalar(k).add(HMID);
+
+  // ⭐⭐ THE CARDBOARD BOX. The line between his two hands IS the handle - point
+  //    that line somewhere else and the shape points somewhere else. No
+  //    gizmo, no axis to pick, no mode: the thing turns because he turned his
+  //    hands, which is what he said in the first place.
+  // ⚠️ THIS IS SWING, NOT ROLL. Twisting both wrists about the line between
+  //    them does nothing yet - that needs the hands' own orientation and it
+  //    is a separate job. Said out loud rather than left for him to find.
+  AXIS0.copy(both.axis);
+  AXIS1.copy(H1).sub(H0);
+  if (AXIS1.lengthSq() > 1e-8) {
+    AXIS1.normalize();
+    DQ.setFromUnitVectors(AXIS0, AXIS1);
+    both.sh.q.copy(DQ).multiply(both.q0);
+  }
+
+  // ⭐ it grows and turns ABOUT THE POINT BETWEEN HIS HANDS, so it stays where
+  //    he is holding it instead of swinging away from him.
+  OFFV.copy(both.p0).sub(both.mid).multiplyScalar(k).applyQuaternion(DQ);
+  both.sh.p.copy(HMID).add(OFFV);
+
   rebuild(both.sh);
   handMoved = true;
   return true;
@@ -2625,7 +2675,7 @@ function hudLines() {
   const out = [];
   const session = renderer.xr.getSession();
   const srcs = session ? Array.from(session.inputSources) : [];
-  out.push('BUILD 11  sources ' + srcs.length
+  out.push('BUILD 12  sources ' + srcs.length
            + '   scale ' + xrRig.scale.x.toFixed(0) + '   near ' + camera.near);
   srcs.forEach(src => {
     out.push('  ' + (src.handedness || '?') + '  ' + (src.targetRayMode || '?')
