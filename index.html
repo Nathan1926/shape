@@ -204,7 +204,7 @@
 
 <!-- ⭐ THE BUILD SAYS ITS OWN NAME, on the screen and in the headset. Never
      again "did it even load" - look at the corner and you know. -->
-<div id="build">build 8</div>
+<div id="build">build 9</div>
 <button id="vr">ENTER VR</button>
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
@@ -2363,6 +2363,7 @@ function carry(dt) {
 //    work exactly as before. Nothing is lost by trying.
 const PINCH_ON = 0.022, PINCH_OFF = 0.035;      // metres, thumb tip to index tip
 const JOINTMAT = new THREE.MeshBasicMaterial({ color:0x9ad1ff });
+const PINCHMAT = new THREE.MeshBasicMaterial({ color:0xffb37a });
 const JOINTGEO = new THREE.SphereGeometry(1, 8, 6);
 
 const hands = [0, 1].map(i => {
@@ -2375,14 +2376,25 @@ const hands = [0, 1].map(i => {
 
 // ⭐ he has to SEE his hands or he cannot aim them. One dot per joint, sized
 //    from the joint's own radius, so it is his hand and not a glove.
+// ⛔⛔ BUILD 7 REPORTED "hands 25" - twenty-five joints, arriving, every
+//    frame, the whole time. His hands were NEVER missing. I was drawing them
+//    at their true anatomical size, 8 mm, in a black void, and calling that
+//    showing him his hands.
+// ⭐ SO DRAW THEM LIKE A TOOL, NOT LIKE AN X-RAY. Fat bright knuckles, and the
+//    two fingers that do the pinching bigger and orange, so the gesture he
+//    needs is the most obvious thing on his hand.
+const PINCHERS = { 'index-finger-tip':1, 'thumb-tip':1 };
 function dressHand(h) {
   for (const name in h.joints) {
     const j = h.joints[name];
     if (!j.userData.dot) {
-      j.userData.dot = new THREE.Mesh(JOINTGEO, JOINTMAT);
+      j.userData.dot = new THREE.Mesh(JOINTGEO,
+        PINCHERS[name] ? PINCHMAT : JOINTMAT);
+      j.userData.dot.frustumCulled = false;
       j.add(j.userData.dot);
     }
-    j.userData.dot.scale.setScalar(j.jointRadius || 0.008);
+    const r = Math.max(j.jointRadius || 0.008, 0.008);
+    j.userData.dot.scale.setScalar(PINCHERS[name] ? r * 2.6 : r * 1.8);
   }
 }
 
@@ -2455,6 +2467,13 @@ function worldGrab(pa, pb) {
 function handsUpdate() {
   const p = [pinchOf(hands[0]), pinchOf(hands[1])];
   hands.forEach(dressHand);
+  // ⛔ JOE, four times now: *"laser beams for hands."* Because I put one there.
+  //    The ray belongs to a controller. A hand that has joints does not need a
+  //    beam - it needs to be near the thing.
+  hands.forEach((h, i) => {
+    const ray = controllers[i].children[0];
+    if (ray) ray.visible = Object.keys(h.joints).length === 0;
+  });
   const holdingWorld = worldGrab(p[0], p[1]);
 
   hands.forEach((h, i) => {
@@ -2498,23 +2517,32 @@ const HUD = new THREE.Mesh(
   new THREE.MeshBasicMaterial({ map:HUDT, transparent:true, depthTest:false }));
 HUD.renderOrder = 999;
 HUD.visible = false;
-// ⭐⭐ HANG IT ON THE CAMERA AND STOP DOING ARITHMETIC. Three writes the head
-//    pose straight onto this camera every frame, so a child of it is simply
-//    always in front of his face - and it inherits the rig's scale, so these
-//    numbers stay in plain metres however big the world gets.
-// ⛔ It was floating in world space before, positioned by hand from a matrix
-//    that was one frame stale. Same disease as the part.
-camera.add(HUD);
-HUD.position.set(0, -0.20, -0.55);
+// ⛔⛔ I HUNG THIS ON THE CAMERA IN BUILD 8 BECAUSE IT WAS TIDIER, AND HE
+//    STOPPED SEEING IT. In build 7 he read it out to me - "hands 25" - so the
+//    world-space version DEMONSTRABLY WORKED and the tidy one demonstrably
+//    did not.
+// ⭐ PUT BACK WHAT WAS WORKING. The stale-matrix worry was real for the PART,
+//    which is placed once on the first frame; it is not a problem for a thing
+//    repositioned every frame, where one frame behind is invisible to a human.
+//    I changed a working thing to fix a bug it did not have.
+scene.add(HUD);
 
 let hudNext = 0;
 const HUDPOS = new THREE.Vector3(), HUDF = new THREE.Vector3(), HUDQ = new THREE.Quaternion();
+const TETHC = new THREE.Vector3(), TETHV = new THREE.Vector3();
+const TETH = new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+  new THREE.LineBasicMaterial({ color:0x7dff9a, depthTest:false }));
+TETH.renderOrder = 998;
+TETH.frustumCulled = false;
+TETH.visible = false;
+scene.add(TETH);
 
 function hudLines() {
   const out = [];
   const session = renderer.xr.getSession();
   const srcs = session ? Array.from(session.inputSources) : [];
-  out.push('BUILD 8   sources ' + srcs.length
+  out.push('BUILD 9   sources ' + srcs.length
            + '   scale ' + xrRig.scale.x.toFixed(0) + '   near ' + camera.near);
   srcs.forEach(src => {
     out.push('  ' + (src.handedness || '?') + '  ' + (src.targetRayMode || '?')
@@ -2567,7 +2595,34 @@ function drawHud() {
 
 function hud(now) {
   HUD.visible = true;
+  const cam = renderer.xr.getCamera();
+  HUDPOS.setFromMatrixPosition(cam.matrixWorld);
+  cam.getWorldDirection(HUDF);
+  HUDQ.setFromRotationMatrix(cam.matrixWorld);
+  const S = xrRig.scale.x;
+  HUD.position.copy(HUDPOS).addScaledVector(HUDF, 0.55 * S);
+  HUD.position.y -= 0.22 * S;
+  HUD.quaternion.copy(HUDQ);
+  HUD.scale.setScalar(S);
   if (now > hudNext) { hudNext = now + 250; drawHud(); }
+
+  // ⭐⭐ THE TETHER, AND IT ENDS BEING LOST FOR GOOD. A bright line from just
+  //    under his chin to the middle of the part. It only shows when the part
+  //    is off to the side or behind him - so it is never clutter, and when he
+  //    is in the dark it is the one thing he can see, and it points.
+  const c = bounds().getCenter(TETHC);
+  TETHV.copy(c).sub(HUDPOS);
+  const off = TETHV.angleTo(HUDF);
+  if (off > 0.42 && TETHV.lengthSq() > 1e-9) {
+    const pos = TETH.geometry.attributes.position;
+    pos.setXYZ(0, HUD.position.x, HUD.position.y, HUD.position.z);
+    pos.setXYZ(1, c.x, c.y, c.z);
+    pos.needsUpdate = true;
+    TETH.geometry.computeBoundingSphere();
+    TETH.visible = true;
+  } else {
+    TETH.visible = false;
+  }
 }
 
 // ══ WALKING ═════════════════════════════════════════════
@@ -2640,6 +2695,7 @@ renderer.setAnimationLoop(() => {
     if (handMoved) { syncCuts(); refreshWelds(); }
   } else {
     HUD.visible = false;
+    TETH.visible = false;
     holdFraming();                                   // the desktop path, untouched
     placeCamera();
   }
