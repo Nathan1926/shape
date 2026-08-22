@@ -133,6 +133,12 @@
      tool changer carries the eight for THIS job, not every tool in the shop.
      A carousel works because tools live in positions you MEMORISE; at thirty
      you are spinning and reading, which is worse than a menu. */
+  /* the VR button hides itself unless the browser can actually do it */
+  #vr { position:fixed; left:50%; bottom:22px; transform:translateX(-50%);
+        display:none; padding:14px 26px; border-radius:10px; cursor:pointer;
+        border:1px solid #3a4450; background:#16222c; color:#9ad1ff;
+        font:600 15px/1 system-ui,sans-serif; letter-spacing:.06em; }
+  #vr:hover { border-color:#9ad1ff; }
   #box { position:fixed; left:0; top:50%; transform:translateY(-50%);
          display:flex; flex-direction:column; gap:8px; padding:10px 8px;
          background:rgba(20,23,27,.72); border-right:1px solid #2a2f36;
@@ -188,6 +194,7 @@
       <path d="M11 23l3-3-3-3 3-3-3-3" stroke-linejoin="round"/></svg></button>
 </div>
 
+<button id="vr">ENTER VR</button>
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
@@ -222,6 +229,16 @@ const renderer = new THREE.WebGLRenderer({ antialias:true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 document.body.appendChild(renderer.domElement);
 const camera = new THREE.PerspectiveCamera(42, 1, 1, 6000);
+
+// ══ THE RIG ═════════════════════════════════════════════
+// ⛔ IN VR YOU DO NOT MOVE THE CAMERA - the headset owns it. You move what
+//    the camera is STANDING ON. So the camera gets a parent, and every VR
+//    question (where am I, how big is the world, which way am I facing)
+//    becomes a question about this one group.
+// ⭐ AT REST IT IS THE IDENTITY, so nothing on the desktop changes at all.
+const xrRig = new THREE.Group();
+xrRig.add(camera);
+scene.add(xrRig);
 
 // ⭐ A GROUND GRID IS NOT DECORATION. A solid floating in a void has no depth
 //    cue, and "does it fight me" cannot be answered if he cannot tell which
@@ -2108,10 +2125,169 @@ cv.addEventListener('touchmove', (e) => {
 }, { passive:true });
 cv.addEventListener('touchend', () => { pinch = null; }, { passive:true });
 
-(function frame() {
-  requestAnimationFrame(frame);
-  holdFraming();
-  placeCamera();
+// ══ VR ══════════════════════════════════════════════════
+// ⭐⭐ JOE, after a night of it flat: *"it was only about as good as it was
+//    w the mouse."* Of course it was - a window in front of your face is
+//    still a window.
+// ⛔ AND THE TRADE HAS TO BE SAID OUT LOUD: PRECISION IN HERE IS WORSE THAN
+//    A MOUSE AND ALWAYS WILL BE. That is exactly why THIS tool belongs in
+//    goggles and SolidWorks does not. What comes back is reach, depth, and a
+//    hand that goes where you point it - and this is a tool for THINKING in
+//    shapes, where near enough is the whole point.
+renderer.xr.enabled = true;
+
+const VRB = document.getElementById('vr');
+
+// ⭐ the button only exists if the browser can actually do it. On the desktop
+//    it never appears, so nothing on the bench changes.
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    if (ok) VRB.style.display = 'block';
+  }).catch(() => {});
+}
+
+VRB.addEventListener('click', async () => {
+  if (renderer.xr.isPresenting) { renderer.xr.getSession().end(); return; }
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+    });
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(session);
+  } catch (err) {
+    // ⛔ say WHY out loud rather than doing nothing and looking broken
+    VRB.textContent = 'VR REFUSED: ' + (err && err.message ? err.message : err);
+  }
+});
+
+// ⭐⭐ THE SCALE IS THE WHOLE COMFORT OF IT. A part here is hundreds of units
+//    across and a man is 1.6 metres, so the rig is scaled to bring the part
+//    to about arm's reach. Read it off the ACTUAL bounds and it works the
+//    same for a bracket or a bridge.
+function placeRig() {
+  const b = bounds();
+  const c = b.getCenter(new THREE.Vector3());
+  const r = Math.max(b.getBoundingSphere(new THREE.Sphere()).radius, 1);
+  const S = r / 0.9;                       // the part reads about 1.8 m across
+  xrRig.scale.setScalar(S);
+  xrRig.quaternion.identity();
+  // eyes land level with the middle of the part, a couple of paces back
+  xrRig.position.set(c.x, c.y - 1.5 * S, c.z + 2.4 * S);
+}
+
+renderer.xr.addEventListener('sessionstart', () => {
+  VRB.textContent = 'LEAVE VR';
+  placeRig();
+});
+
+renderer.xr.addEventListener('sessionend', () => {
+  VRB.textContent = 'ENTER VR';
+  xrRig.position.set(0, 0, 0);
+  xrRig.quaternion.identity();
+  xrRig.scale.setScalar(1);
+  grabbed = [null, null];
+});
+
+// ══ HANDS ═══════════════════════════════════════════════
+// ⛔ GETTING IN WITHOUT HANDS WOULD BE WORSE THAN THE MOUSE, NOT BETTER - he
+//    would be a statue in there. Point and squeeze moves a shape, and a hole
+//    moves exactly like a solid, because it IS one.
+let grabbed = [null, null];
+const XRM = new THREE.Matrix4(), XRR = new THREE.Raycaster(), XRP = new THREE.Vector3();
+const controllers = [0, 1].map(i => {
+  const c = renderer.xr.getController(i);
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]),
+    new THREE.LineBasicMaterial({ color:0xffb37a }));
+  line.scale.z = 6;                                  // six metres of reach
+  c.add(line);
+  xrRig.add(c);                                      // inherits the rig's scale
+
+  c.addEventListener('selectstart', () => {
+    XRM.identity().extractRotation(c.matrixWorld);
+    XRR.ray.origin.setFromMatrixPosition(c.matrixWorld);
+    XRR.ray.direction.set(0, 0, -1).applyMatrix4(XRM).normalize();
+    const hit = XRR.intersectObjects(pickable(), false)[0];
+    if (!hit) return;
+    const sh = hit.object.userData.shape;
+    if (!sh) return;
+    snapshot();                                      // undo still works in here
+    XRP.setFromMatrixPosition(c.matrixWorld);
+    grabbed[i] = { sh, off: sh.p.clone().sub(XRP) };
+  });
+
+  c.addEventListener('selectend', () => { grabbed[i] = null; });
+  return c;
+});
+
+function carry() {
+  let moved = false;
+  grabbed.forEach((g, i) => {
+    if (!g) return;
+    XRP.setFromMatrixPosition(controllers[i].matrixWorld);
+    g.sh.p.copy(XRP).add(g.off);
+    g.sh.mesh.position.copy(g.sh.p);
+    if (g.sh.wall) g.sh.wall.position.copy(g.sh.p);
+    moved = true;
+  });
+  if (moved) { syncCuts(); refreshWelds(); }
+}
+
+// ══ WALKING ═════════════════════════════════════════════
+// ⭐ left stick slides, right stick turns IN STEPS. ⚠️ Steps, not a smooth
+//    spin - a smooth spin is what makes people sick, and a man who feels sick
+//    in this thing will never put it back on.
+const XRF = new THREE.Vector3(), XRSIDE = new THREE.Vector3(), XRUP = new THREE.Vector3(0,1,0);
+const XRQ = new THREE.Quaternion(), XREYE = new THREE.Vector3();
+let snapped = false;
+
+function turnRig(a) {
+  renderer.xr.getCamera().getWorldPosition(XREYE);
+  XRQ.setFromAxisAngle(XRUP, a);
+  xrRig.position.sub(XREYE).applyQuaternion(XRQ).add(XREYE);
+  xrRig.quaternion.premultiply(XRQ);
+}
+
+function walk(dt) {
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  for (const src of session.inputSources) {
+    const gp = src.gamepad;
+    if (!gp || gp.axes.length < 4) continue;
+    const ax = gp.axes[2], ay = gp.axes[3];
+    if (src.handedness === 'right') {
+      if (Math.abs(ax) > 0.7) {
+        if (!snapped) { snapped = true; turnRig(-Math.sign(ax) * Math.PI / 6); }
+      } else if (Math.abs(ax) < 0.3) snapped = false;
+      continue;
+    }
+    if (Math.abs(ax) < 0.15 && Math.abs(ay) < 0.15) continue;
+    renderer.xr.getCamera().getWorldDirection(XRF);
+    XRF.y = 0;
+    if (XRF.lengthSq() < 1e-6) continue;
+    XRF.normalize();
+    XRSIDE.crossVectors(XRF, XRUP).normalize();
+    const step = 1.6 * xrRig.scale.x * dt;           // 1.6 m/s, in world units
+    xrRig.position.addScaledVector(XRF, -ay * step);
+    xrRig.position.addScaledVector(XRSIDE, ax * step);
+  }
+}
+
+// ⛔ setAnimationLoop, NOT requestAnimationFrame - a headset draws on its own
+//    clock and rAF is not it. ⚠️ This is also why the page froze whenever the
+//    browser pane was hidden: no frames, no rAF, no test.
+let last = performance.now();
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  const dt = Math.min((now - last) / 1000, 0.1);
+  last = now;
+  if (renderer.xr.isPresenting) {
+    walk(dt);
+    carry();
+  } else {
+    holdFraming();                                   // the desktop path, untouched
+    placeCamera();
+  }
   renderer.render(scene, camera);
-})();
+});
 </script>
