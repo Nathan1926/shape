@@ -145,6 +145,13 @@
         border:1px solid #3a4450; background:#16222c; color:#9ad1ff;
         font:600 15px/1 system-ui,sans-serif; letter-spacing:.06em; }
   #vr:hover { border-color:#9ad1ff; }
+  #tray { position:fixed; left:84px; bottom:10px; display:flex; gap:6px; }
+  #tray button { border:1px solid #3a4450; background:#141a21; color:#8fa3b5;
+                 border-radius:7px; padding:7px 12px; cursor:pointer;
+                 font:600 12px/1 ui-monospace,monospace; letter-spacing:.08em; }
+  #tray button:hover { border-color:#9ad1ff; color:#9ad1ff; }
+  #said { position:fixed; left:84px; bottom:48px; color:#7dff9a; pointer-events:none;
+          font:600 12px/1 ui-monospace,monospace; }
   #build { position:fixed; right:10px; bottom:8px; color:#4a5560; pointer-events:none;
            font:600 12px/1 ui-monospace,monospace; letter-spacing:.08em; }
   #box { position:fixed; left:0; top:50%; transform:translateY(-50%);
@@ -204,7 +211,15 @@
 
 <!-- ⭐ THE BUILD SAYS ITS OWN NAME, on the screen and in the headset. Never
      again "did it even load" - look at the corner and you know. -->
-<div id="build">build 12</div>
+<div id="build">build 13</div>
+<div id="tray">
+  <button id="bSave" title="write the drawing to a file">SAVE</button>
+  <button id="bLoad" title="open a drawing file">OPEN</button>
+  <button id="bLink" title="copy a link that carries the drawing">LINK</button>
+  <button id="bViews" title="six angles, one picture">VIEWS</button>
+</div>
+<div id="said"></div>
+<input id="fIn" type="file" accept=".txt,.shape,.md" style="display:none">
 <button id="vr">ENTER VR</button>
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
@@ -2163,6 +2178,252 @@ cv.addEventListener('touchmove', (e) => {
 }, { passive:true });
 cv.addEventListener('touchend', () => { pinch = null; }, { passive:true });
 
+// ══ THE HANDOFF ═════════════════════════════════════════
+// ⭐⭐ JOE: *"an export isn't required as long as you guys can see the result
+//    ... it'd be best if I could be done and say there you go, look at it."*
+// ⛔ THERE IS NOTHING TO EXPORT, AND THAT IS THE GOOD NEWS. This program has
+//    no geometry in it at all - a box is six numbers and a hole is a shape
+//    with a minus sign. So the drawing IS the numbers. A whole part is a few
+//    hundred bytes and it reads like a parts list.
+// ⭐⭐ AND IT GOES BOTH WAYS, WHICH IS THE PART WORTH HAVING. Anything that can
+//    write four lines of text can hand HIM a shape - Mac can answer a
+//    sentence with a bracket, and Joe opens it and grabs it with his hands
+//    and says what is wrong with it. The abstract asks for exactly that:
+//    *rendered back as something real enough to react to.* Same file, read
+//    the other way.
+const SAID = document.getElementById('said');
+let saidT = 0;
+function say(t) {
+  SAID.textContent = t;
+  clearTimeout(saidT);
+  saidT = setTimeout(() => { SAID.textContent = ''; }, 4000);
+}
+
+const n3 = v => [v.x, v.y, v.z].map(n => +n.toFixed(3)).join(',');
+
+function toText() {
+  const out = ['# poiesis shape v1', '# one line per shape. anything after # is ignored.'];
+  SHAPES.forEach(sh => {
+    const bits = [sh.kind === 'box' ? 'box' : 'cyl', 'p=' + n3(sh.p)];
+    if (sh.kind === 'box') bits.push('s=' + n3(sh.s));
+    else {
+      bits.push('axis=' + sh.axis, 'h=' + (+sh.h.toFixed(3)));
+      bits.push('r0=' + (+sh.a0.toFixed(3)) + ',' + (+sh.b0.toFixed(3)));
+      bits.push('r1=' + (+sh.a1.toFixed(3)) + ',' + (+sh.b1.toFixed(3)));
+    }
+    const q = sh.q;
+    if (q && (q.x || q.y || q.z || Math.abs(q.w - 1) > 1e-6)) {
+      bits.push('q=' + [q.x, q.y, q.z, q.w].map(n => +n.toFixed(5)).join(','));
+    }
+    if (sh.neg) bits.push('neg');
+    out.push(bits.join('  '));
+  });
+  return out.join('\n') + '\n';
+}
+
+// ⛔ A PARSER THAT SWALLOWS A BAD LINE IS WORSE THAN ONE THAT REFUSES. It
+//    reports what it took and what it could not read, both.
+function fromText(txt) {
+  const made = [], bad = [];
+  txt.split(/\r?\n/).forEach((raw, i) => {
+    const line = raw.split('#')[0].trim();
+    if (!line) return;
+    const bits = line.split(/\s+/);
+    const kind = bits.shift().toLowerCase();
+    if (kind !== 'box' && kind !== 'cyl') { bad.push('line ' + (i + 1)); return; }
+    const kv = {};
+    bits.forEach(b => {
+      const eq = b.indexOf('=');
+      if (eq < 0) kv[b.toLowerCase()] = true;
+      else kv[b.slice(0, eq).toLowerCase()] = b.slice(eq + 1);
+    });
+    const nums = k => (kv[k] || '').split(',').map(Number);
+    const p = nums('p');
+    if (p.length < 3 || p.some(isNaN)) { bad.push('line ' + (i + 1)); return; }
+    const sh = { kind, p: new THREE.Vector3(p[0], p[1], p[2]) };
+    if (kind === 'box') {
+      const d = nums('s');
+      if (d.length < 3 || d.some(isNaN)) { bad.push('line ' + (i + 1)); return; }
+      sh.s = new THREE.Vector3(Math.abs(d[0]), Math.abs(d[1]), Math.abs(d[2]));
+    } else {
+      sh.axis = ['x', 'y', 'z'].includes((kv.axis || 'y').toLowerCase())
+                ? (kv.axis || 'y').toLowerCase() : 'y';
+      sh.h = Math.abs(Number(kv.h)) || 40;
+      const r0 = nums('r0'), r1 = nums('r1');
+      sh.a0 = Math.abs(r0[0]) || 12; sh.b0 = Math.abs(r0[1] ?? r0[0]) || sh.a0;
+      sh.a1 = Math.abs(r1[0] ?? r0[0]) || sh.a0; sh.b1 = Math.abs(r1[1] ?? r1[0]) || sh.a1;
+    }
+    const q = nums('q');
+    if (q.length === 4 && !q.some(isNaN)) sh.q = new THREE.Quaternion(q[0], q[1], q[2], q[3]).normalize();
+    if (kv.neg) sh.neg = true;
+    made.push(sh);
+  });
+  return { made, bad };
+}
+
+function adopt(list, from) {
+  if (!list.length) { say('nothing readable in ' + from); return false; }
+  snapshot();
+  SHAPES.slice().forEach(sh => {
+    scene.remove(sh.mesh);
+    if (sh.wall) scene.remove(sh.wall);
+    if (sh.mesh) sh.mesh.geometry.dispose();
+  });
+  SHAPES.length = 0;
+  list.forEach(sh => { SHAPES.push(sh); rebuild(sh); });
+  syncCuts();
+  refreshWelds();
+  showHandles(null);
+  showHook(null);
+  framing = null;                        // ⭐ let the view re-fit what arrived
+  return true;
+}
+
+function drop(name, text, mime) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: mime || 'text/plain' }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+document.getElementById('bSave').onclick = () => {
+  drop('shape.txt', toText());
+  say('saved ' + SHAPES.length + ' shapes');
+};
+
+document.getElementById('fIn').onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  f.text().then(t => {
+    const r = fromText(t);
+    if (adopt(r.made, f.name)) {
+      say('opened ' + r.made.length + ' shapes'
+          + (r.bad.length ? '  \u26a0 skipped ' + r.bad.join(', ') : ''));
+    }
+  });
+  e.target.value = '';
+};
+document.getElementById('bLoad').onclick = () => document.getElementById('fIn').click();
+
+// ⭐ drop a file anywhere on the page and it opens
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (!f) return;
+  f.text().then(t => {
+    const r = fromText(t);
+    if (adopt(r.made, f.name)) say('opened ' + r.made.length + ' shapes from ' + f.name);
+  });
+});
+
+// ⭐ THE LINK CARRIES THE DRAWING. In the hash, so it never reaches a server
+//    and no length limit applies.
+const b64 = t => btoa(unescape(encodeURIComponent(t))).replace(/=+$/, '');
+const unb64 = t => decodeURIComponent(escape(atob(t)));
+
+document.getElementById('bLink').onclick = () => {
+  const url = location.origin + location.pathname + '#s=' + b64(toText());
+  const done = () => say('link copied - ' + url.length + ' characters');
+  if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, () => {
+    prompt('copy this:', url);
+  });
+  else prompt('copy this:', url);
+};
+
+if (location.hash.startsWith('#s=')) {
+  try {
+    const r = fromText(unb64(location.hash.slice(3)));
+    if (r.made.length) {
+      SHAPES.slice().forEach(sh => { scene.remove(sh.mesh); sh.mesh.geometry.dispose(); });
+      SHAPES.length = 0;
+      r.made.forEach(sh => { SHAPES.push(sh); rebuild(sh); });
+      syncCuts();
+      framing = null;
+    }
+  } catch (err) { console.warn('bad link', err); }
+}
+
+// ══ SIX ANGLES, ONE PICTURE ═════════════════════════════
+// ⭐ his stated worst case, and it is worth having anyway: the thing a man can
+//    glance at without opening anything.
+// ⛔ Rendered into an offscreen target rather than grabbed off the screen, so
+//    it does not need preserveDrawingBuffer slowing every frame for a button
+//    pressed twice a day.
+const VIEWS = [
+  ['FRONT', new THREE.Vector3(0, 0, 1)],
+  ['RIGHT', new THREE.Vector3(1, 0, 0)],
+  ['BACK', new THREE.Vector3(0, 0, -1)],
+  ['LEFT', new THREE.Vector3(-1, 0, 0)],
+  ['TOP', new THREE.Vector3(0, 1, 0.001)],
+  ['CORNER', new THREE.Vector3(0.9, 0.7, 0.9)],
+];
+
+function sheet() {
+  const W = 520, H = 400;
+  const rt = new THREE.WebGLRenderTarget(W, H, { samples: 4 });
+  const cam = new THREE.PerspectiveCamera(38, W / H, 0.5, 12000);
+  const b = bounds();
+  const c = b.getCenter(new THREE.Vector3());
+  const r = Math.max(b.getBoundingSphere(new THREE.Sphere()).radius, 1);
+
+  const page = document.createElement('canvas');
+  page.width = W * 3; page.height = H * 2 + 34;
+  const g = page.getContext('2d');
+  g.fillStyle = '#0b0f14'; g.fillRect(0, 0, page.width, page.height);
+
+  const buf = new Uint8Array(W * H * 4);
+  const tile = document.createElement('canvas');
+  tile.width = W; tile.height = H;
+  const tg = tile.getContext('2d');
+  const img = tg.createImageData(W, H);
+
+  const wasGrid = grid.visible;
+  grid.visible = false;
+  const oldTarget = renderer.getRenderTarget();
+
+  VIEWS.forEach(([name, dir], i) => {
+    cam.position.copy(c).addScaledVector(dir.clone().normalize(), r * 3.1);
+    cam.up.set(0, 1, 0);
+    if (name === 'TOP') cam.up.set(0, 0, -1);
+    cam.lookAt(c);
+    cam.updateProjectionMatrix();
+    renderer.setRenderTarget(rt);
+    renderer.render(scene, cam);
+    renderer.readRenderTargetPixels(rt, 0, 0, W, H, buf);
+    // ⛔ GL hands them back bottom-up. Flip, or every view is upside down.
+    for (let y = 0; y < H; y++) {
+      const src = (H - 1 - y) * W * 4, dst = y * W * 4;
+      img.data.set(buf.subarray(src, src + W * 4), dst);
+    }
+    tg.putImageData(img, 0, 0);
+    const x = (i % 3) * W, y = Math.floor(i / 3) * H + 34;
+    g.drawImage(tile, x, y);
+    g.strokeStyle = '#232b34'; g.strokeRect(x + 0.5, y + 0.5, W - 1, H - 1);
+    g.fillStyle = '#9ad1ff'; g.font = '600 17px ui-monospace, monospace';
+    g.fillText(name, x + 12, y + 26);
+  });
+
+  renderer.setRenderTarget(oldTarget);
+  grid.visible = wasGrid;
+  rt.dispose();
+
+  g.fillStyle = '#7f8c99'; g.font = '600 18px ui-monospace, monospace';
+  g.fillText('POIESIS SHAPE   ' + SHAPES.length + ' shapes, '
+             + SHAPES.filter(x => x.neg).length + ' of them holes', 14, 23);
+  page.toBlob(bl => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(bl);
+    a.download = 'shape_views.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  });
+  say('six angles saved');
+}
+
+document.getElementById('bViews').onclick = sheet;
+
 // ══ VR ══════════════════════════════════════════════════
 // ⭐⭐ JOE, after a night of it flat: *"it was only about as good as it was
 //    w the mouse."* Of course it was - a window in front of your face is
@@ -2675,7 +2936,7 @@ function hudLines() {
   const out = [];
   const session = renderer.xr.getSession();
   const srcs = session ? Array.from(session.inputSources) : [];
-  out.push('BUILD 12  sources ' + srcs.length
+  out.push('BUILD 13  sources ' + srcs.length
            + '   scale ' + xrRig.scale.x.toFixed(0) + '   near ' + camera.near);
   srcs.forEach(src => {
     out.push('  ' + (src.handedness || '?') + '  ' + (src.targetRayMode || '?')
