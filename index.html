@@ -169,6 +169,11 @@
   <!-- ⭐ Two faces with arrows driving them together. Not a chain, not a
        magnet - the picture of the thing happening. -->
   <!-- ⭐ A box with an arc over it. The picture of a part being rolled. -->
+  <!-- ⭐ A plate with a hole through it and the plug coming out. -->
+  <button data-tool="cut" title="cut">
+    <svg viewBox="0 0 32 32"><path d="M5 12l11-5 11 5v9l-11 5-11-5z"/>
+      <ellipse cx="16" cy="14" rx="4.5" ry="2.2"/>
+      <path d="M11.5 14v3.5a4.5 2.2 0 0 0 9 0V14"/></svg></button>
   <button data-tool="turn" title="turn">
     <svg viewBox="0 0 32 32"><path d="M8 17l8-4 8 4v7l-8 4-8-4z"/>
       <path d="M8 17l8 4 8-4"/>
@@ -293,6 +298,248 @@ function axisVec(a) {
                    : new THREE.Vector3(0,0,1);
 }
 
+// ══ CUT ══════════════════════════════════════════════════════════════════
+// ⛔⛔ THE DESIGN RECORD CALLED THIS RUNG "WHERE THIS REPRESENTATION DIES", and
+//    it was right about the danger and wrong about the only way out.
+//    Its reasoning: after a boolean the result is triangles, so there is no
+//    number behind a face and PUSH-PULL STOPS WORKING - the thing he likes.
+//    Its escape hatch was a feature tree, which it also warned is the same road
+//    as a dimension box.
+//
+// ⭐⭐⭐ THERE IS A THIRD ANSWER AND IT IS THE CHEAPEST THING IN THIS FILE:
+//    ⛔ DO NOT COMPUTE THE BOOLEAN. EVER.
+//    A hole is a SHAPE THAT IS MARKED NEGATIVE. It keeps its own numbers, sits
+//    in the same list as everything else, and can be pushed, pulled, deformed,
+//    welded, mated and turned exactly like a solid. Nothing is subtracted.
+//    ⭐ THE SUBTRACTION HAPPENS PER PIXEL, AT DRAW TIME: for each fragment of a
+//    solid, ask "is this point inside a cutter" and throw the pixel away if it
+//    is. Every shape here is axis-aligned and analytic, so that question is
+//    three lines of arithmetic - not a mesh operation at all.
+//
+// ⭐⭐ WHAT THIS BUYS, AND IT IS THE WHOLE RUNG:
+//      - the box is still six numbers. Grab its face, it still moves.
+//      - the hole is still a cylinder. Grab ITS wall, the hole gets wider.
+//      - move the hole and the box heals behind it, with nothing recomputed.
+//      - no feature tree, because there is no history to keep. Just two shapes
+//        and a minus sign. ⛔ The thing the record feared - a tree he would end
+//        up managing - never gets built.
+//
+// ⚠️ WHAT IT HONESTLY IS NOT: a solid model. There is no mesh with a hole in
+//    it, so this cannot be exported to a printer or handed to SolidWorks as
+//    geometry. ⭐ THAT IS THE RIGHT TRADE HERE AND IT WAS ALWAYS THE TRADE -
+//    this is the tool for THINKING in shapes. When it has to become a real
+//    part, that is Mac's job and a different program. The record's "knife is a
+//    door" warning stands; this rung just is not that door.
+// ⚠️ AND THE OTHER LIMIT, STATED: four cutters at once. Not a law of the
+//    technique - a uniform array size, raised by changing one number.
+const MAXCUT = 4, MAXSOL = 8;
+
+function emptySlot() {
+  return { on:0, kind:0, c:new THREE.Vector3(), h:new THREE.Vector3(),
+           ax:1, r0:new THREE.Vector2(1,1), r1:new THREE.Vector2(1,1) };
+}
+
+// ⭐ ONE SET OF UNIFORM OBJECTS, SHARED BY REFERENCE with every material in the
+//    scene. Write to them once and every shape sees it - no per-material loop,
+//    no chance of one solid disagreeing with another about where the hole is.
+const CUT_U = {
+  uNcut:  { value: 0 },
+  uNsol:  { value: 0 },
+  uCut:   { value: Array.from({ length: MAXCUT }, emptySlot) },
+  uSol:   { value: Array.from({ length: MAXSOL }, emptySlot) },
+  uWall:  { value: 0 },     // 1 = drawing the inside surface of a hole
+};
+
+// ⭐ "inside" for the two kinds we have. A frustum tapers, so the radii are
+//    read at the height of the point rather than at an end - which means a hole
+//    he has drawn up into a cone cuts a tapered hole, for free.
+const CUT_GLSL = `
+struct Solid {
+  float on; float kind; vec3 c; vec3 h; float ax; vec2 r0; vec2 r1;
+};
+bool insideOne(Solid s, vec3 p) {
+  if (s.on < 0.5) return false;
+  vec3 d = p - s.c;
+  if (s.kind < 0.5) {
+    return all(lessThanEqual(abs(d), s.h));
+  }
+  float al = s.ax < 0.5 ? d.x : (s.ax < 1.5 ? d.y : d.z);
+  float hh = s.h.x;                          // half length along its own axis
+  if (abs(al) > hh) return false;
+  float t = clamp((al + hh) / (2.0 * hh), 0.0, 1.0);
+  vec2 r = mix(s.r0, s.r1, t);
+  vec2 q = s.ax < 0.5 ? d.yz : (s.ax < 1.5 ? d.xz : d.xy);
+  return dot(q / max(r, vec2(1e-4)), q / max(r, vec2(1e-4))) <= 1.0;
+}
+// ⛔⛔ JOE: *"it leaves those surfaces behind when the cutting tools
+//    intersect."* Right, and here is why. Each hole draws its own wall and
+//    keeps it wherever it sits inside SOLID material. It never asked whether
+//    it was sitting inside ANOTHER HOLE - and there is no material there, so
+//    there is no wall there either. Two crossing holes each left a skin
+//    hanging in the other one's empty space.
+// ⭐⭐ THE FIX HAS TO EXCLUDE THE WALL'S OWN HOLE or every wall deletes
+//    itself - a wall IS its own cutter's surface, so it is "inside" it.
+//    Shrinking each cutter by a hair does exactly that with no bookkeeping:
+//    a wall sits ON its own boundary, which is OUTSIDE the shrunken copy, and
+//    STRICTLY INSIDE any other hole it crosses. No index to track, nothing to
+//    keep in step when shapes are added or removed.
+// ⚠️ THE COST, STATED: two holes that touch exactly tangent can leave a
+//    sliver about this wide. Shapes here are tens of units across.
+const float CUTEPS = 0.35;
+
+bool insideShrunk(Solid s, vec3 p) {
+  if (s.on < 0.5) return false;
+  vec3 d = p - s.c;
+  if (s.kind < 0.5) {
+    return all(lessThanEqual(abs(d), max(s.h - vec3(CUTEPS), vec3(0.0))));
+  }
+  float al = s.ax < 0.5 ? d.x : (s.ax < 1.5 ? d.y : d.z);
+  float hh = s.h.x - CUTEPS;
+  if (hh <= 0.0 || abs(al) > hh) return false;
+  float t = clamp((al + hh) / (2.0 * hh), 0.0, 1.0);
+  vec2 r = max(mix(s.r0, s.r1, t) - vec2(CUTEPS), vec2(1e-4));
+  vec2 q = s.ax < 0.5 ? d.yz : (s.ax < 1.5 ? d.xz : d.xy);
+  return dot(q / r, q / r) <= 1.0;
+}
+uniform Solid uCut[${MAXCUT}];
+uniform Solid uSol[${MAXSOL}];
+uniform int uNcut;
+uniform int uNsol;
+uniform float uWall;
+varying vec3 vCutPos;
+`;
+
+function paintShader(mat) {
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uCut = CUT_U.uCut;
+    sh.uniforms.uSol = CUT_U.uSol;
+    sh.uniforms.uNcut = CUT_U.uNcut;
+    sh.uniforms.uNsol = CUT_U.uNsol;
+    // ⛔⛔ THE ONE UNIFORM THAT MUST NOT BE SHARED, AND SHARING IT BROKE THE
+    //    HOLE. Everything else here points at the SAME uniform object on
+    //    purpose - write once and every shape agrees about where the hole is.
+    //    uWall is the opposite: it is the flag that has to DISAGREE between a
+    //    solid and the inside of a hole. Shared, it was always 0, so the wall
+    //    was told "you are a solid" and discarded itself wherever it sat
+    //    inside a cutter - which is EVERYWHERE, because the wall IS the
+    //    cutter's own back faces. The hole came out empty instead of walled.
+    // ⭐ One object per material. It is read, never written.
+    sh.uniforms.uWall = { value: mat.userData.wall ? 1 : 0 };
+
+    sh.vertexShader = CUT_GLSL + sh.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\n  vCutPos = (modelMatrix * vec4(position,1.0)).xyz;');
+
+    sh.fragmentShader = CUT_GLSL + sh.fragmentShader.replace(
+      '#include <clipping_planes_fragment>',
+      `#include <clipping_planes_fragment>
+      {
+        bool inCut = false;
+        for (int i = 0; i < ${MAXCUT}; i++) {
+          if (i >= uNcut) break;
+          if (insideOne(uCut[i], vCutPos)) { inCut = true; }
+        }
+        if (uWall > 0.5) {
+          // ⭐ THE WALL OF THE HOLE. Drawn from the cutter's own back faces, and
+          //    kept only where it is buried in a solid - otherwise the hole
+          //    would hang in the air past the edge of the part.
+          bool inSol = false;
+          for (int i = 0; i < ${MAXSOL}; i++) {
+            if (i >= uNsol) break;
+            if (insideOne(uSol[i], vCutPos)) { inSol = true; }
+          }
+          if (!inSol) discard;
+          // ⛔ and the stretch of this wall lying inside ANOTHER hole is not a
+          //    wall at all - there is nothing there for it to be the edge of.
+          bool inOther = false;
+          for (int i = 0; i < ${MAXCUT}; i++) {
+            if (i >= uNcut) break;
+            if (insideShrunk(uCut[i], vCutPos)) { inOther = true; }
+          }
+          if (inOther) discard;
+        } else if (inCut) {
+          discard;                       // ⛔ this pixel is in the hole
+        }
+      }`);
+  };
+  mat.needsUpdate = true;
+  return mat;
+}
+
+function fillSlot(slot, sh) {
+  slot.on = 1;
+  slot.c.copy(sh.p);
+  if (sh.kind === 'box') {
+    slot.kind = 0;
+    slot.h.copy(sh.s).multiplyScalar(0.5);
+  } else {
+    slot.kind = 1;
+    slot.h.set(sh.h / 2, 0, 0);
+    slot.ax = sh.axis === 'x' ? 0 : (sh.axis === 'y' ? 1 : 2);
+    slot.r0.set(sh.a0, sh.b0);
+    slot.r1.set(sh.a1, sh.b1);
+  }
+}
+
+// ⭐ CALLED WHENEVER ANYTHING MOVES OR CHANGES SIZE, which is why the hole
+//    tracks his hand with nothing recomputed - the numbers ARE the hole.
+function refreshCuts() {
+  let nc = 0, ns = 0;
+  SHAPES.forEach(sh => {
+    if (sh.neg) { if (nc < MAXCUT) fillSlot(CUT_U.uCut.value[nc++], sh); }
+    else        { if (ns < MAXSOL) fillSlot(CUT_U.uSol.value[ns++], sh); }
+  });
+  for (let i = nc; i < MAXCUT; i++) CUT_U.uCut.value[i].on = 0;
+  for (let i = ns; i < MAXSOL; i++) CUT_U.uSol.value[i].on = 0;
+  CUT_U.uNcut.value = nc;
+  CUT_U.uNsol.value = ns;
+}
+
+// ⭐ A CUTTER LOOKS LIKE A TOOL, NOT LIKE A PART. Wireframe, so he can see
+//    where it is and grab it, and can never mistake it for material.
+const CUTMAT = new THREE.MeshBasicMaterial({ color:0xff9a5c, wireframe:true,
+                                             transparent:true, opacity:0.75 });
+
+// the inside surface of every hole, drawn from the cutters' own back faces
+// ⚠️ the flag has to be set BEFORE paintShader reads it, so build the
+//    material, mark it, and only then paint it.
+const WALLMAT = new THREE.MeshStandardMaterial({
+  color:0x9aa4ad, roughness:0.65, metalness:0.05, side:THREE.BackSide });
+WALLMAT.userData.wall = true;
+paintShader(WALLMAT);
+
+function cutDrop(sh) {
+  sh.neg = !sh.neg;
+  rebuild(sh);
+  refreshCuts();
+  return sh.neg ? 'now a hole' : 'now solid again';
+}
+
+// ══ HIDING THE CUTTERS ═══════════════════════════════════
+// ⭐⭐ JOE, within a minute of his first hole: *"It looks like I cut a hole,
+//    but how do I get rid of the wireframe?"*
+// ⭐ THE WIREFRAME IS RIGHT WHILE HE IS PLACING A CUTTER AND WRONG THE MOMENT
+//    HE WANTS TO LOOK AT THE PART. So it is a toggle, not a decision - one key,
+//    nothing armed, nothing remembered.
+// ⛔ THE HOLE ITSELF STAYS. Only the orange tool goes. The grey inner wall is
+//    the hole, not the cutter, and hiding that would hide the work.
+// ⛔ AND A HIDDEN CUTTER IS NOT GRABBABLE - see pickable(). Leaving it
+//    clickable would mean he grabs something he cannot see.
+let cutsHidden = false;
+
+function applyCutVisibility() {
+  SHAPES.forEach(sh => { if (sh.neg && sh.mesh) sh.mesh.visible = !cutsHidden; });
+  // ⭐ the button carries the state, so an empty scene still answers the key
+  const b = document.querySelector('#box button[data-tool="cut"]');
+  if (b) b.classList.toggle('held', cutsHidden);
+  if (cutsHidden) { showHandles(null); showHook(null); }
+}
+
+function toggleCuts() {
+  cutsHidden = !cutsHidden;
+  applyCutVisibility();
+}
+
 // ⭐ ONE FUNCTION TURNS NUMBERS INTO A MESH, and it is the only place that
 //    knows how. Every edit anywhere just changes a number and calls this.
 function rebuild(sh) {
@@ -303,7 +550,23 @@ function rebuild(sh) {
   } else {
     g = frustum(sh);
   }
-  sh.mesh = new THREE.Mesh(g, MAT.clone());
+  // ⭐ a cutter wears the wireframe; a solid wears the painted material. The
+  //    cutter ALSO gets a second mesh - its own back faces - which is what
+  //    draws the inside of the hole.
+  sh.mesh = new THREE.Mesh(g, sh.neg ? CUTMAT : paintShader(MAT.clone()));
+  sh.mesh.visible = !(sh.neg && cutsHidden);   // ⛔ a rebuild must not un-hide it
+  if (sh.wall) { scene.remove(sh.wall); sh.wall = null; }
+  if (sh.neg) {
+    sh.wall = new THREE.Mesh(g, WALLMAT);
+    sh.wall.userData.shape = sh;      // ⭐ grabbing the wall grabs the hole
+    sh.wall.position.copy(sh.p);
+    sh.wall.rotation.set(0, 0, 0);
+    if (sh.kind === 'cyl') {
+      if (sh.axis === 'x') sh.wall.rotation.z = Math.PI / 2;
+      if (sh.axis === 'z') sh.wall.rotation.x = Math.PI / 2;
+    }
+    scene.add(sh.wall);
+  }
   sh.mesh.position.copy(sh.p);
   if (sh.kind === 'cyl') {
     if (sh.axis === 'x') sh.mesh.rotation.z = Math.PI / 2;
@@ -311,6 +574,7 @@ function rebuild(sh) {
   }
   sh.mesh.userData.shape = sh;
   scene.add(sh.mesh);
+  if (typeof refreshCuts === 'function') refreshCuts();
 }
 SHAPES.forEach(rebuild);
 
@@ -413,11 +677,20 @@ function showHook(sh) {
   // ⭐⭐ HE SEES WHAT HE IS ABOUT TO PICK UP, BEFORE HE PICKS IT UP. A hook that
   //    silently carries three other shapes is a surprise, and a surprise in a
   //    tool he cannot undo with fine motor control is the thing to avoid.
-  SHAPES.forEach(o => { if (o.mesh) o.mesh.material.emissive.setHex(0x000000); });
+  // ⛔⛔ JOE: *"I cannot move them."* AND IT WAS WORSE THAN HE SAID - one
+  //    cutter anywhere in the scene stopped him moving ANYTHING.
+  // ⚠️ A cutter wears MeshBasicMaterial, which has NO `.emissive`. This line
+  //    ran over every shape, hit the cutter, and threw - before the line that
+  //    makes the hook visible. So the blue dot never appeared again, for any
+  //    shape, from the first cut onward. A crash three statements early looks
+  //    exactly like a feature that was never built.
+  // ⭐ A cutter simply has no glow channel; that is not an error, so skip it
+  //    and carry on rather than dying on it.
+  SHAPES.forEach(o => { if (o.mesh && o.mesh.material.emissive) o.mesh.material.emissive.setHex(0x000000); });
   hookOwner = sh || null;
   if (!sh) { hook.visible = false; return; }
   crewOf(sh).forEach(o => {
-    if (o !== sh && o.mesh) o.mesh.material.emissive.setHex(0x3a2610);
+    if (o !== sh && o.mesh && o.mesh.material.emissive) o.mesh.material.emissive.setHex(0x3a2610);
   });
   hook.position.copy(shapeCentre(sh));
   hook.scale.setScalar(Math.max(1.8, radius() * 0.026));
@@ -552,7 +825,7 @@ function handleUnder(e) {
              dirAxis:dir, point:hh.point };
   }
 
-  const hit = ray.intersectObjects(SHAPES.map(s => s.mesh), false)[0];
+  const hit = ray.intersectObjects(pickable(), false)[0];
   if (!hit) return null;
   const sh = hit.object.userData.shape;
   const n = hit.face.normal.clone();
@@ -817,7 +1090,8 @@ function moveDrag(e) {
     });
 
     drag.sh.mesh.position.copy(drag.sh.p);     // ⭐ no rebuild - nothing changed
-    refreshWelds();                             //    shape, only where it is
+    syncCuts();                                 //    shape, only where it is
+    refreshWelds();
     showHook(drag.sh);
     showHandles(drag.sh.kind === 'cyl' ? drag.sh : null);
     return;
@@ -864,6 +1138,7 @@ function moveDrag(e) {
     sh[kb] = Math.max(0.2, w[kb] + d);
   }
   rebuild(sh);
+  syncCuts();
   // ⭐ RIGHT HERE, WHERE THE NUMBERS HAVE JUST CHANGED AND THE MESH IS FRESH.
   //    It used to run in a microtask, which was a way of saying "later" without
   //    knowing when later was. Face pushes, deform, the beads and the waist all
@@ -882,17 +1157,39 @@ function moveDrag(e) {
 //    "drop the shape onto the face where I want it, or just position it."
 let carrying = null;
 
+// ⭐ ONE LIST OF WHAT THE MOUSE CAN HIT, so hiding a cutter hides it from
+//    the cursor as well. ⛔ A thing he cannot see that still takes his click is
+//    exactly the surprise this file keeps warning about.
+// ⭐⭐ JOE, after the first pocket: *"the wireframe hide works, but I can't
+//    edit the cut features."* Both halves of that are one bug. Hiding the
+//    orange tool took the hole out of his reach, because the only thing he
+//    could ever grab was the tool - never the hole itself.
+// ⭐⭐ THE ANSWER IS THE ONE THE DESIGN RECORD ALREADY PROMISED: *grab ITS
+//    wall, the hole gets wider.* The wall of a hole is a real surface, drawn
+//    every frame, sitting exactly where he is already pointing. So make it
+//    grabbable and route the grab to the shape that owns it. Now the hole
+//    edits the same way a solid does, hidden tool or not - and hiding the
+//    wireframe costs him nothing at all.
+function pickable() {
+  const out = [];
+  SHAPES.forEach(s => {
+    if (s.mesh && s.mesh.visible) out.push(s.mesh);
+    if (s.wall && s.wall.visible) out.push(s.wall);
+  });
+  return out;
+}
+
 function shapeAt(e) {
   toNdc(e);
   ray.setFromCamera(ptr, camera);
-  const hit = ray.intersectObjects(SHAPES.map(x => x.mesh), false)[0];
+  const hit = ray.intersectObjects(pickable(), false)[0];
   return hit ? hit.object.userData.shape : null;
 }
 
 function groundOrFace(e) {
   toNdc(e);
   ray.setFromCamera(ptr, camera);
-  const hit = ray.intersectObjects(SHAPES.map(x => x.mesh), false)[0];
+  const hit = ray.intersectObjects(pickable(), false)[0];
   if (hit) return { at:hit.point.clone(), n:hit.face.normal.clone()
                       .transformDirection(hit.object.matrixWorld) };
   // the grid, so a dropped thing has somewhere to be
@@ -940,6 +1237,15 @@ document.querySelectorAll('#box button').forEach(btn => {
     // ⭐ A TOOL IS DROPPED ON A THING; A SHAPE IS DROPPED IN A PLACE. Same
     //    gesture out of the same carousel, which is what makes the next tool
     //    (the knife) cost nothing to teach.
+    if (tool === 'cut') {
+      const on = shapeAt(e);
+      if (!on) return;
+      snapshot();
+      cutDrop(on);
+      showHook(null);
+      return;
+    }
+
     if (tool === 'weld') {
       const on = shapeAt(e);
       if (!on) return;                      // dropped on air - nothing happened
@@ -1358,6 +1664,7 @@ function crewOf(sh) {
 //    is undone with one drop, and refusing to weld what he can see touching
 //    would read as broken.
 function touching(a, b) {
+  if (a.neg || b.neg) return false;   // ⛔ you cannot weld to a hole
   const A = ext(a), B = ext(b);
   const tol = Math.max(3, radius() * 0.04);
   return AX.every(x => Math.min(A.max[x], B.max[x]) - Math.max(A.min[x], B.min[x]) > -tol);
@@ -1374,6 +1681,13 @@ function seamBox(a, b) {
 // ⭐ TACKS ALONG THE SEAM, not one dot at the middle. Three beads read as a
 //    joint; one bead reads as a bug light. They sit where a welder would put
 //    them, which is the whole reason he will know what they mean.
+// ⭐ position-only moves skip rebuild() by design, so the hole's wall and the
+//    uniforms have to be brought along by hand or the hole lags his cursor.
+function syncCuts() {
+  SHAPES.forEach(sh => { if (sh.wall) sh.wall.position.copy(sh.p); });
+  refreshCuts();
+}
+
 function refreshWelds() {
   tacks.clear();
   const r = Math.max(1.1, radius() * 0.016);
@@ -1546,8 +1860,8 @@ const PAST_MAX = 40;
 function snapshot() {
   past.push({
     shapes: SHAPES.map(sh => sh.kind === 'box'
-      ? { kind:'box', p:sh.p.clone(), s:sh.s.clone() }
-      : { kind:'cyl', p:sh.p.clone(), axis:sh.axis, h:sh.h,
+      ? { kind:'box', p:sh.p.clone(), s:sh.s.clone(), neg:!!sh.neg }
+      : { kind:'cyl', p:sh.p.clone(), axis:sh.axis, h:sh.h, neg:!!sh.neg,
           a0:sh.a0, b0:sh.b0, a1:sh.a1, b1:sh.b1 }),
     welds: WELDS.map(w => {
       const c = w.slice();
@@ -1564,6 +1878,7 @@ function undo() {
   while (SHAPES.length > was.length) {          // a drop is undone by removing it
     const gone = SHAPES.pop();
     scene.remove(gone.mesh);
+    if (gone.wall) scene.remove(gone.wall);
     gone.mesh.geometry.dispose();
   }
   WELDS.length = 0;
@@ -1575,11 +1890,13 @@ function undo() {
   was.forEach((w, i) => {
     const sh = SHAPES[i];
     sh.p.copy(w.p);
+    sh.neg = !!w.neg;
     if (sh.kind === 'box') sh.s.copy(w.s);
     else { sh.h = w.h; sh.a0 = w.a0; sh.b0 = w.b0; sh.a1 = w.a1; sh.b1 = w.b1; }
     rebuild(sh);
   });
   refreshWelds();
+  syncCuts();
   dropTool();                 // ⛔ undo cannot leave a tool half-used in his hand
   ghost.visible = false;
   hideDim();
@@ -1588,6 +1905,10 @@ function undo() {
 }
 addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { dropTool(); return; }
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'h') {
+    toggleCuts();
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     e.preventDefault();
     undo();
