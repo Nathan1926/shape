@@ -1,4 +1,10 @@
 <meta charset="utf-8">
+<!-- ⛔⛔ HE RELOADED, NOTHING CHANGED, AND WE BOTH SPENT AN HOUR ON IT. The
+     headset was handing him a cached copy of the page. I had already hit this
+     on my own browser this morning and then sent him a plain link anyway.
+     ⭐ A stale page and a broken page look IDENTICAL from inside goggles. -->
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <title>Shape</title>
 
 <!--
@@ -139,6 +145,8 @@
         border:1px solid #3a4450; background:#16222c; color:#9ad1ff;
         font:600 15px/1 system-ui,sans-serif; letter-spacing:.06em; }
   #vr:hover { border-color:#9ad1ff; }
+  #build { position:fixed; right:10px; bottom:8px; color:#4a5560; pointer-events:none;
+           font:600 12px/1 ui-monospace,monospace; letter-spacing:.08em; }
   #box { position:fixed; left:0; top:50%; transform:translateY(-50%);
          display:flex; flex-direction:column; gap:8px; padding:10px 8px;
          background:rgba(20,23,27,.72); border-right:1px solid #2a2f36;
@@ -194,6 +202,9 @@
       <path d="M11 23l3-3-3-3 3-3-3-3" stroke-linejoin="round"/></svg></button>
 </div>
 
+<!-- ⭐ THE BUILD SAYS ITS OWN NAME, on the screen and in the headset. Never
+     again "did it even load" - look at the corner and you know. -->
+<div id="build">build 7</div>
 <button id="vr">ENTER VR</button>
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
@@ -2482,8 +2493,8 @@ function hudLines() {
   const out = [];
   const session = renderer.xr.getSession();
   const srcs = session ? Array.from(session.inputSources) : [];
-  out.push('sources ' + srcs.length + '   scale ' + xrRig.scale.x.toFixed(0)
-           + '   near ' + camera.near);
+  out.push('BUILD 7   sources ' + srcs.length
+           + '   scale ' + xrRig.scale.x.toFixed(0) + '   near ' + camera.near);
   srcs.forEach(src => {
     out.push('  ' + (src.handedness || '?') + '  ' + (src.targetRayMode || '?')
              + '  hand:' + (src.hand ? src.hand.size : 'no')
