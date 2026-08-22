@@ -204,7 +204,7 @@
 
 <!-- ⭐ THE BUILD SAYS ITS OWN NAME, on the screen and in the headset. Never
      again "did it even load" - look at the corner and you know. -->
-<div id="build">build 9</div>
+<div id="build">build 10</div>
 <button id="vr">ENTER VR</button>
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
@@ -2196,37 +2196,35 @@ let needPlace = false;
 const HEADW = new THREE.Vector3(), HEADL = new THREE.Vector3();
 const FWDW = new THREE.Vector3(), FWDL = new THREE.Vector3();
 const TARG = new THREE.Vector3(), QINV = new THREE.Quaternion();
+const PQ = new THREE.Quaternion();
 
 function placeRig() {
+  // ⛔⛔ JOE: *"the green laser points right at my eyeballs. So I think the
+  //    model is living in my head."* It was. Three tries, three different
+  //    wrong answers, all from the SAME mistake: I kept working out where his
+  //    head was by reading the CAMERA, whose world matrix is the rig matrix
+  //    times the head pose - and I had just changed the rig scale on the line
+  //    above. I was measuring with a ruler I was still bending.
+  // ⭐⭐ SO STOP ASKING THE CAMERA AND ASK THE HEADSET. The viewer pose comes
+  //    straight out of the frame in plain metres, in the room's own space,
+  //    and it does not know or care what the rig is doing. No inverse
+  //    rotations, no dividing by a scale I just set, nothing to get stale.
+  const frame = renderer.xr.getFrame();
+  const ref = renderer.xr.getReferenceSpace();
+  if (!frame || !ref) return false;
+  const pose = frame.getViewerPose(ref);
+  if (!pose) return false;                    // ⭐ no pose, no placing. Try again.
+
   const b = bounds();
   const c = b.getCenter(new THREE.Vector3());
   const r = Math.max(b.getBoundingSphere(new THREE.Sphere()).radius, 1);
-  const S = r / 0.3;                       // the part reads about 0.6 m across
-  xrRig.scale.setScalar(S);
+  const S = r / 0.3;                          // the part reads about 0.6 m across
 
-  const cam = renderer.xr.getCamera();
-
-  // ⛔⛔ THE BUG THAT PUT HIM IN THE DARK, AND MY GUARD AGAINST IT WAS USELESS.
-  //    I read the head pose at the top of the frame, before three has taken
-  //    the viewer pose from the headset. On the first frame that matrix is
-  //    the identity - head at the FLOOR, facing -Z. So the part was placed
-  //    0.75 m in front of the floor origin, which is about his shoelaces,
-  //    and he was standing 1.6 m above it looking at the horizon.
-  // ⚠️ MY GUARD ASKED "is the position zero AND the direction zero" - but an
-  //    identity matrix gives a direction of (0,0,-1), which is not zero. The
-  //    test could never fire. A guard that cannot fail is not a guard.
-  // ⭐ ASK A QUESTION THAT ONLY HAS ONE ANSWER WHEN THE POSE IS REAL: the XR
-  //    camera has no sub-cameras at all until views arrive. No views, no
-  //    pose, no placing - come back next frame.
-  if (!cam.cameras || cam.cameras.length === 0) return false;
-
-  HEADW.setFromMatrixPosition(cam.matrixWorld);
-  cam.getWorldDirection(FWDW);
-
-  // his head and his facing, expressed in the rig's own metres
-  QINV.copy(xrRig.quaternion).invert();
-  HEADL.copy(HEADW).sub(xrRig.position).applyQuaternion(QINV).divideScalar(S);
-  FWDL.copy(FWDW).applyQuaternion(QINV);
+  const t = pose.transform.position;
+  const o = pose.transform.orientation;
+  HEADL.set(t.x, t.y, t.z);                   // metres, in the room
+  PQ.set(o.x, o.y, o.z, o.w);
+  FWDL.set(0, 0, -1).applyQuaternion(PQ);
   FWDL.y = 0;
   if (FWDL.lengthSq() < 1e-6) FWDL.set(0, 0, -1);
   FWDL.normalize();
@@ -2235,8 +2233,11 @@ function placeRig() {
   TARG.copy(HEADL).addScaledVector(FWDL, 0.75);
   TARG.y -= 0.12;
 
-  // solve for the rig so the middle of the part lands exactly there
-  xrRig.position.copy(c).sub(TARG.multiplyScalar(S).applyQuaternion(xrRig.quaternion));
+  // ⭐ the rig is now just: metres times S, then shifted. Nothing else.
+  xrRig.quaternion.identity();
+  xrRig.scale.setScalar(S);
+  xrRig.position.copy(c).sub(TARG.multiplyScalar(S));
+  xrRig.updateMatrixWorld(true);
   return true;
 }
 
@@ -2542,7 +2543,7 @@ function hudLines() {
   const out = [];
   const session = renderer.xr.getSession();
   const srcs = session ? Array.from(session.inputSources) : [];
-  out.push('BUILD 9   sources ' + srcs.length
+  out.push('BUILD 10  sources ' + srcs.length
            + '   scale ' + xrRig.scale.x.toFixed(0) + '   near ' + camera.near);
   srcs.forEach(src => {
     out.push('  ' + (src.handedness || '?') + '  ' + (src.targetRayMode || '?')
@@ -2574,6 +2575,9 @@ function hudLines() {
       deg = Math.round(THREE.MathUtils.radToDeg(Math.atan2(
         HUDF.x * flat.z - HUDF.z * flat.x, HUDF.x * flat.x + HUDF.z * flat.z)));
     }
+    out.push('head ' + HEADL.y.toFixed(2) + ' m   rig '
+             + xrRig.position.x.toFixed(0) + ',' + xrRig.position.y.toFixed(0)
+             + ',' + xrRig.position.z.toFixed(0));
     out.push('part ' + (to.length() / S).toFixed(2) + ' m   '
              + Math.abs(deg) + (deg > 0 ? ' left' : ' right')
              + '   ' + (to.y / S > 0.3 ? 'ABOVE' : to.y / S < -0.3 ? 'BELOW' : 'level'));
