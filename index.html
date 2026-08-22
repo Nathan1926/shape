@@ -2171,15 +2171,48 @@ VRB.addEventListener('click', async () => {
 //    just reaching for it.
 // ⚠️ AND HE CAN CHANGE IT - both hands pinched, pull apart to grow the world,
 //    together to shrink it, drag to slide it. See worldGrab().
+// ⛔⛔ JOE: *"the shapes are totally gone now. I'm actually in total
+//    blackness."* BOTH HALVES OF THAT ARE MINE.
+//    I put the part along the ROOM's axis - whichever way the guardian was
+//    drawn - instead of along his nose. Face the other way and it is behind
+//    him. And I had just taken the grid away, so behind him meant a void with
+//    nothing in it at all. One mistake was survivable; together they are a
+//    black screen.
+// ⭐ SO PLACE IT OFF HIS ACTUAL HEAD POSE, and do it on the first frame INSIDE
+//    the session - at sessionstart the headset has not reported where he is
+//    yet, which is the trap that made the first version look correct.
+let needPlace = false;
+const HEADW = new THREE.Vector3(), HEADL = new THREE.Vector3();
+const FWDW = new THREE.Vector3(), FWDL = new THREE.Vector3();
+const TARG = new THREE.Vector3(), QINV = new THREE.Quaternion();
+
 function placeRig() {
   const b = bounds();
   const c = b.getCenter(new THREE.Vector3());
   const r = Math.max(b.getBoundingSphere(new THREE.Sphere()).radius, 1);
   const S = r / 0.3;                       // the part reads about 0.6 m across
   xrRig.scale.setScalar(S);
-  xrRig.quaternion.identity();
-  // the middle of the part sits at chest height, three quarters of a metre out
-  xrRig.position.set(c.x, c.y - 1.25 * S, c.z + 0.75 * S);
+
+  const cam = renderer.xr.getCamera();
+  HEADW.setFromMatrixPosition(cam.matrixWorld);
+  cam.getWorldDirection(FWDW);
+  if (HEADW.lengthSq() === 0 && FWDW.lengthSq() === 0) return false;
+
+  // his head and his facing, expressed in the rig's own metres
+  QINV.copy(xrRig.quaternion).invert();
+  HEADL.copy(HEADW).sub(xrRig.position).applyQuaternion(QINV).divideScalar(S);
+  FWDL.copy(FWDW).applyQuaternion(QINV);
+  FWDL.y = 0;
+  if (FWDL.lengthSq() < 1e-6) FWDL.set(0, 0, -1);
+  FWDL.normalize();
+
+  // three quarters of a metre down his line of sight, a touch below eye level
+  TARG.copy(HEADL).addScaledVector(FWDL, 0.75);
+  TARG.y -= 0.12;
+
+  // solve for the rig so the middle of the part lands exactly there
+  xrRig.position.copy(c).sub(TARG.multiplyScalar(S).applyQuaternion(xrRig.quaternion));
+  return true;
 }
 
 renderer.xr.addEventListener('sessionstart', () => {
@@ -2206,7 +2239,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   camera.far = 2000;
   camera.updateProjectionMatrix();
 
-  placeRig();
+  needPlace = true;          // ⛔ not now - on the first frame, when he exists
 });
 
 renderer.xr.addEventListener('sessionend', () => {
@@ -2250,6 +2283,9 @@ const controllers = [0, 1].map(i => {
   });
 
   c.addEventListener('selectend', () => { grabbed[i] = null; });
+  // ⭐ THE WAY HOME. Squeeze the grip and the part comes back to your face,
+  //    whichever way you have wandered off to.
+  c.addEventListener('squeezestart', () => { needPlace = true; });
   return c;
 });
 
@@ -2421,6 +2457,73 @@ function handsUpdate() {
 
 let handMoved = false;
 
+// ══ THE READOUT ═════════════════════════════════════════
+// ⭐⭐ I HAVE BEEN GUESSING ABOUT HIS HANDS FROM THE OUTSIDE AND I CANNOT SEE
+//    IN THERE. So the page says what it actually received - how many input
+//    sources, what kind, and whether any of them carry joints. A zero is
+//    ambiguous; a census is not.
+// ⭐ It also proves the loop is alive. If he can read this, the black screen
+//    was never a crash.
+const HUDC = document.createElement('canvas');
+HUDC.width = 640; HUDC.height = 320;
+const HUDX = HUDC.getContext('2d');
+const HUDT = new THREE.CanvasTexture(HUDC);
+const HUD = new THREE.Mesh(
+  new THREE.PlaneGeometry(0.34, 0.17),
+  new THREE.MeshBasicMaterial({ map:HUDT, transparent:true, depthTest:false }));
+HUD.renderOrder = 999;
+HUD.visible = false;
+scene.add(HUD);
+
+let hudNext = 0;
+const HUDPOS = new THREE.Vector3(), HUDF = new THREE.Vector3(), HUDQ = new THREE.Quaternion();
+
+function hudLines() {
+  const out = [];
+  const session = renderer.xr.getSession();
+  const srcs = session ? Array.from(session.inputSources) : [];
+  out.push('sources ' + srcs.length + '   scale ' + xrRig.scale.x.toFixed(0)
+           + '   near ' + camera.near);
+  srcs.forEach(src => {
+    out.push('  ' + (src.handedness || '?') + '  ' + (src.targetRayMode || '?')
+             + '  hand:' + (src.hand ? src.hand.size : 'no')
+             + '  pad:' + (src.gamepad ? src.gamepad.axes.length : 'no'));
+  });
+  hands.forEach((h, i) => {
+    out.push('  hand' + i + ' joints ' + Object.keys(h.joints).length
+             + '  seen:' + (h.visible ? 'yes' : 'no'));
+  });
+  out.push('shapes ' + SHAPES.length + '   cutters '
+           + SHAPES.filter(x => x.neg).length);
+  return out;
+}
+
+function drawHud() {
+  HUDX.clearRect(0, 0, 640, 320);
+  HUDX.fillStyle = 'rgba(8,12,16,0.82)';
+  HUDX.fillRect(0, 0, 640, 320);
+  HUDX.strokeStyle = '#3a4450';
+  HUDX.strokeRect(1, 1, 638, 318);
+  HUDX.fillStyle = '#9ad1ff';
+  HUDX.font = '600 26px ui-monospace, monospace';
+  hudLines().slice(0, 9).forEach((t, i) => HUDX.fillText(t, 18, 44 + i * 32));
+  HUDT.needsUpdate = true;
+}
+
+function hud(now) {
+  HUD.visible = true;
+  const cam = renderer.xr.getCamera();
+  HUDPOS.setFromMatrixPosition(cam.matrixWorld);
+  cam.getWorldDirection(HUDF);
+  HUDQ.setFromRotationMatrix(cam.matrixWorld);
+  const S = xrRig.scale.x;
+  HUD.position.copy(HUDPOS).addScaledVector(HUDF, 0.55 * S);
+  HUD.position.y -= 0.22 * S;
+  HUD.quaternion.copy(HUDQ);
+  HUD.scale.setScalar(S);
+  if (now > hudNext) { hudNext = now + 250; drawHud(); }
+}
+
 // ══ WALKING ═════════════════════════════════════════════
 // ⭐ left stick slides, right stick turns SMOOTHLY.
 // ⚠️⚠️ I BUILT SNAP TURNING FIRST, ON THE STANDARD ARGUMENT THAT A SMOOTH SPIN
@@ -2482,12 +2585,15 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   if (renderer.xr.isPresenting) {
+    if (needPlace && placeRig()) needPlace = false;
+    hud(now);
     walk(dt);                                    // sticks, if he is on controllers
     handMoved = false;
     handsUpdate();                               // hands, if he is on hands
     carry(dt);
     if (handMoved) { syncCuts(); refreshWelds(); }
   } else {
+    HUD.visible = false;
     holdFraming();                                   // the desktop path, untouched
     placeCamera();
   }
